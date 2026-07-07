@@ -138,6 +138,8 @@ A bare `uvx gpt-researcher` installs the published PyPI package, not this checko
 
 The server loads credentials and model settings from the checkout passed to `uvx --from`, using uv's installed `direct_url.json` metadata. `$GPT_RESEARCHER_PROFILE_DIR` can override that path if needed, but the normal command `uvx --from /Users/aac6fef/Developer/gpt-researcher gpt-researcher` works even when launched outside the repository.
 
+`research_report` is guarded for instability: it retries the configured mixed profile twice by default, treats empty-source abstention reports as failed attempts, and then falls back to Tavily-only. The result includes `fallback_used` and an `attempts` list so callers can see whether Codex was retried or bypassed.
+
 Call the MCP tool with:
 
 ```json
