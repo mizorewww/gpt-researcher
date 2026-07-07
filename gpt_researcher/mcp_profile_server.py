@@ -78,7 +78,7 @@ def _frontmatter(
     tone: str,
     researcher: Any,
 ) -> str:
-    sources_count = len(getattr(researcher, "visited_urls", []) or [])
+    metrics = _report_metrics(researcher)
     total_cost = round(researcher.get_costs(), 6) if researcher else 0.0
     return (
         "---\n"
@@ -88,7 +88,9 @@ def _frontmatter(
         f'report_type: "{report_type}"\n'
         f'report_source: "{report_source}"\n'
         f'tone: "{tone}"\n'
-        f"sources_count: {sources_count}\n"
+        f"sources_count: {metrics['sources_count']}\n"
+        f"visited_urls_count: {metrics['visited_urls_count']}\n"
+        f"context_chars: {metrics['context_chars']}\n"
         f"total_cost_usd: {total_cost}\n"
         "---\n"
     )
@@ -97,6 +99,19 @@ def _frontmatter(
 def _context_text(researcher: Any) -> str:
     context = getattr(researcher, "context", "")
     return "\n".join(context) if isinstance(context, list) else str(context or "")
+
+
+def _report_metrics(researcher: Any) -> dict[str, int]:
+    context = getattr(researcher, "context", None)
+    context_chunks_count = (
+        len(context) if isinstance(context, list) else (1 if str(context or "").strip() else 0)
+    )
+    return {
+        "sources_count": context_chunks_count,
+        "context_chunks_count": context_chunks_count,
+        "context_chars": len(_context_text(researcher)),
+        "visited_urls_count": len(getattr(researcher, "visited_urls", []) or []),
+    }
 
 
 def _invalid_report_reason(report: str, researcher: Any) -> str | None:
@@ -217,6 +232,49 @@ def _save_report(
     return task_id, final_markdown, path
 
 
+def _save_failure_audit(
+    *,
+    query: str,
+    report_type: str,
+    report_source: str,
+    tone: str,
+    profile: dict[str, Any],
+    fallback_used: bool,
+    attempts: list[dict[str, Any]],
+    researcher: Any,
+) -> tuple[str, Path, dict[str, Any]]:
+    task_id = str(uuid4())
+    title = _safe_filename(query)
+    metrics = _report_metrics(researcher)
+    total_cost = round(researcher.get_costs(), 6) if researcher else 0.0
+    payload = {
+        "task_id": task_id,
+        "status": "failed",
+        "reason": "all research attempts failed quality validation",
+        "title": title,
+        "query": query,
+        "report_type": report_type,
+        "report_source": report_source,
+        "tone": tone,
+        "sources_count": metrics["sources_count"],
+        "visited_urls_count": metrics["visited_urls_count"],
+        "context_chars": metrics["context_chars"],
+        "total_cost_usd": total_cost,
+        "profile": profile,
+        "fallback_used": fallback_used,
+        "attempts": attempts,
+    }
+
+    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    path = OUTPUT_DIR / f"{title}.failed.json"
+    index = 2
+    while path.exists():
+        path = OUTPUT_DIR / f"{title}_{index}.failed.json"
+        index += 1
+    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+    return task_id, path, payload
+
+
 @mcp.tool()
 def profile_info() -> dict[str, Any]:
     """Return the active GPT Researcher search profile without running research."""
@@ -301,11 +359,13 @@ async def research_report(
     researcher = None
     report = ""
     fallback_used = False
+    accepted_report = False
 
     for attempt_number in range(1, mixed_attempts + 1):
         try:
             researcher, report = await run_once_with_timeout()
             quality = await _judge_report_quality(query, report, researcher)
+            metrics = _report_metrics(researcher)
             attempts.append(
                 {
                     "attempt": attempt_number,
@@ -313,11 +373,11 @@ async def research_report(
                     "status": "ok" if quality["ok"] else "invalid",
                     "reason": None if quality["ok"] else quality["reason"],
                     "quality": quality,
-                    "sources_count": len(getattr(researcher, "visited_urls", []) or []),
-                    "context_chars": len(_context_text(researcher)),
+                    **metrics,
                 }
             )
             if quality["ok"]:
+                accepted_report = True
                 break
         except Exception as exc:
             attempts.append(
@@ -333,6 +393,7 @@ async def research_report(
         try:
             researcher, report = await run_once_with_timeout("tavily")
             quality = await _judge_report_quality(query, report, researcher)
+            metrics = _report_metrics(researcher)
             attempts.append(
                 {
                     "attempt": 1,
@@ -340,10 +401,10 @@ async def research_report(
                     "status": "ok" if quality["ok"] else "invalid",
                     "reason": None if quality["ok"] else quality["reason"],
                     "quality": quality,
-                    "sources_count": len(getattr(researcher, "visited_urls", []) or []),
-                    "context_chars": len(_context_text(researcher)),
+                    **metrics,
                 }
             )
+            accepted_report = bool(quality["ok"])
         except Exception as exc:
             attempts.append(
                 {
@@ -353,7 +414,21 @@ async def research_report(
                     "reason": f"{type(exc).__name__}: {exc}",
                 }
             )
-            raise
+
+    active_profile = _profile("tavily" if fallback_used else mixed_retriever)
+    if not accepted_report:
+        task_id, failure_path, failure_payload = _save_failure_audit(
+            query=query,
+            report_type=report_type,
+            report_source=report_source,
+            tone=tone,
+            profile=active_profile,
+            fallback_used=fallback_used,
+            attempts=attempts,
+            researcher=researcher,
+        )
+        failure_payload["path"] = str(failure_path)
+        raise RuntimeError(json.dumps(failure_payload, ensure_ascii=False))
 
     task_id, final_markdown, path = _save_report(
         query=query,
@@ -368,9 +443,9 @@ async def research_report(
         "task_id": task_id,
         "path": str(path),
         "report": final_markdown,
-        "sources_count": len(getattr(researcher, "visited_urls", []) or []),
+        **_report_metrics(researcher),
         "total_cost_usd": round(researcher.get_costs(), 6),
-        "profile": _profile("tavily" if fallback_used else mixed_retriever),
+        "profile": active_profile,
         "fallback_used": fallback_used,
         "attempts": attempts,
     }
