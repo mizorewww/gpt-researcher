@@ -11,7 +11,7 @@ import os
 import random
 
 from ..actions.agent_creator import choose_agent
-from ..actions.query_processing import get_search_results, plan_research_outline
+from ..actions.query_processing import plan_research_outline
 from ..actions.utils import stream_output
 from ..document import DocumentLoader, LangChainDocumentLoader, OnlineDocumentLoader
 from ..utils.enum import ReportSource, ReportType
@@ -44,6 +44,7 @@ class ResearchConductor:
         self._mcp_results_cache = None
         # Track MCP query count for balanced mode
         self._mcp_query_count = 0
+        self._retriever_semaphores = {}
 
     async def plan_research(self, query, query_domains=None):
         """Gets the sub-queries from the query
@@ -59,7 +60,7 @@ class ResearchConductor:
             self.researcher.websocket,
         )
 
-        search_results = await get_search_results(query, self.researcher.retrievers[0], query_domains, researcher=self.researcher)
+        search_results = await self._get_search_results_from_all_retrievers(query, query_domains)
         self.logger.info(f"Initial search results obtained: {len(search_results)} results")
 
         await stream_output(
@@ -754,47 +755,88 @@ class ResearchConductor:
         if query_domains is None:
             query_domains = []
 
-        # Iterate through the currently set retrievers
-        # This allows the method to work when retrievers are temporarily modified
-        for retriever_class in self.researcher.retrievers:
-            # Skip MCP retrievers as they don't provide URLs for scraping
-            if "mcpretriever" in retriever_class.__name__.lower():
-                continue
+        search_results = await self._get_search_results_from_all_retrievers(query, query_domains)
 
-            try:
-                # Instantiate the retriever with the sub-query
-                retriever = retriever_class(query, query_domains=query_domains)
-
-                # Perform the search using the current retriever
-                search_results = await asyncio.to_thread(
-                    retriever.search, max_results=self.researcher.cfg.max_search_results_per_query
-                )
-
-                if not search_results:
-                    continue
-
-                # Separate results that already have content from those needing scraping
-                for result in search_results:
-                    url = result.get("href") or result.get("url")
-                    raw_content = result.get("raw_content")
-                    if url and raw_content and len(raw_content) > 100:
-                        # Only raw_content signals that a retriever already fetched the full page.
-                        # body is snippet-sized text for most web retrievers and still needs scraping.
-                        prefetched_content.append({
-                            "url": url,
-                            "raw_content": raw_content,
-                        })
-                        self.researcher.add_research_sources([{"url": url}])
-                    elif url:
-                        new_search_urls.append(url)
-            except Exception as e:
-                self.logger.error(f"Error searching with {retriever_class.__name__}: {e}")
+        # Separate results that already have content from those needing scraping.
+        for result in search_results:
+            url = result.get("href") or result.get("url")
+            raw_content = result.get("raw_content")
+            if url and raw_content and len(raw_content) > 100:
+                # Only raw_content signals that a retriever already fetched the full page.
+                # body is snippet-sized text for most web retrievers and still needs scraping.
+                prefetched_content.append({
+                    "url": url,
+                    "raw_content": raw_content,
+                    "title": result.get("title", ""),
+                })
+                self.researcher.add_research_sources([{"url": url}])
+            elif url:
+                new_search_urls.append(url)
 
         # Get unique URLs
         new_search_urls = await self._get_new_urls(new_search_urls)
         random.shuffle(new_search_urls)
 
         return new_search_urls, prefetched_content
+
+    async def _get_search_results_from_all_retrievers(self, query, query_domains: list | None = None):
+        """Run the same query through every configured non-MCP retriever and merge results."""
+        if query_domains is None:
+            query_domains = []
+
+        retriever_classes = [
+            retriever_class
+            for retriever_class in self.researcher.retrievers
+            if "mcpretriever" not in retriever_class.__name__.lower()
+        ]
+
+        async def run_retriever(retriever_class):
+            retriever_name = retriever_class.__name__
+            semaphore = self._get_retriever_semaphore(retriever_name)
+            try:
+                async with semaphore:
+                    retriever = retriever_class(query, query_domains=query_domains)
+                    results = await asyncio.to_thread(
+                        retriever.search,
+                        max_results=self.researcher.cfg.max_search_results_per_query,
+                    )
+                self.logger.info(
+                    f"{retriever_name} returned {len(results or [])} results for query: {query}"
+                )
+                return retriever_name, results or []
+            except Exception as e:
+                self.logger.error(f"Error searching with {retriever_name}: {e}")
+                return retriever_name, []
+
+        gathered = await asyncio.gather(
+            *[run_retriever(retriever_class) for retriever_class in retriever_classes]
+        )
+
+        merged_results = []
+        seen_urls = set()
+        for retriever_name, results in gathered:
+            for result in results:
+                if not isinstance(result, dict):
+                    continue
+                url = result.get("href") or result.get("url")
+                dedupe_key = url or f"{retriever_name}:{result.get('title', '')}:{result.get('body', '')[:120]}"
+                if dedupe_key in seen_urls:
+                    continue
+                seen_urls.add(dedupe_key)
+                result.setdefault("retriever", retriever_name)
+                merged_results.append(result)
+
+        return merged_results
+
+    def _get_retriever_semaphore(self, retriever_name: str):
+        """Limit expensive retrievers so sub-query fan-out does not overload the system."""
+        if retriever_name not in self._retriever_semaphores:
+            if retriever_name == "CodexSearch":
+                limit = int(os.getenv("CODEX_SEARCH_RETRIEVER_CONCURRENCY", "1"))
+            else:
+                limit = int(os.getenv("SEARCH_RETRIEVER_CONCURRENCY", "8"))
+            self._retriever_semaphores[retriever_name] = asyncio.Semaphore(max(1, limit))
+        return self._retriever_semaphores[retriever_name]
 
     async def _scrape_data_by_urls(self, sub_query, query_domains: list | None = None):
         """
@@ -1006,4 +1048,3 @@ class ResearchConductor:
                     "progress": progress
                 }
             )
-

@@ -1,10 +1,21 @@
 {
   "mcpServers": {
-    "gpt-researcher": {
-      "command": "uvx",
+    "gpt-researcher-codex-long": {
+      "command": ".venv/bin/python",
       "args": [
-        "gpt-researcher"
-      ]
+        "mcp_profile_server.py"
+      ],
+      "env": {
+        "RETRIEVER": "tavily,codex",
+        "CODEX_SEARCH_MODE": "plan-exec",
+        "CODEX_SEARCH_TIMEOUT": "300",
+        "CODEX_SEARCH_RETRIEVER_TIMEOUT": "300",
+        "CODEX_SEARCH_RETRIEVER_CONCURRENCY": "1",
+        "CODEX_SEARCH_MODEL": "gpt-5.5",
+        "CODEX_SEARCH_REASONING_EFFORT": "medium",
+        "CODEX_SEARCH_SERVICE_TIER": "priority",
+        "CODEX_SEARCH_SUPPORTS_WEBSOCKETS": "false"
+      }
     }
   }
 }

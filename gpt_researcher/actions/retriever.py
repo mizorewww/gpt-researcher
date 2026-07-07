@@ -33,6 +33,7 @@ def get_retriever(retriever: str):
         - custom: Custom user-defined retriever
         - mcp: Model Context Protocol retriever
         - xquik: Xquik X/Twitter search
+        - codex: Local Codex CLI web search
     """
     match retriever:
         case "google":
@@ -91,6 +92,10 @@ def get_retriever(retriever: str):
             from gpt_researcher.retrievers import CRWRetriever
 
             return CRWRetriever
+        case "codex":
+            from gpt_researcher.retrievers import CodexSearch
+
+            return CodexSearch
         case "semantic_scholar":
             from gpt_researcher.retrievers import SemanticScholarSearch
 

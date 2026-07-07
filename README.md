@@ -155,6 +155,28 @@ report = await researcher.write_report()
 
 **For more examples and configurations, please refer to the [PIP documentation](https://docs.gptr.dev/docs/gpt-researcher/gptr/pip-package) page.**
 
+### Local Tavily + Codex Long Search Profile
+
+This checkout includes a local Codex search retriever profile for higher-quality web research. It runs Tavily and Codex as peer search tools for the same query, merges their results into the normal scrape/compress/report flow, and uses a 300s Codex timeout for long searches.
+
+One-line local report command:
+
+```bash
+.venv/bin/python cli.py "调查上周的美股市场,调查不同板块的表现,并说明详细逻辑" --report_type research_report --tone objective --report_source web --no-pdf --no-docx
+```
+
+The profile is controlled through `.env`:
+
+```bash
+RETRIEVER=tavily,codex
+CODEX_SEARCH_MODE=plan-exec
+CODEX_SEARCH_TIMEOUT=300
+CODEX_SEARCH_RETRIEVER_TIMEOUT=300
+CODEX_SEARCH_RETRIEVER_CONCURRENCY=1
+```
+
+For MCP clients, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`, which starts `mcp_profile_server.py` with the same profile and exposes the `research_report` tool.
+
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.
 

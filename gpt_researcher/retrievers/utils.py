@@ -76,6 +76,7 @@ VALID_RETRIEVERS = [
     "pubmed_central",
     "exa",
     "crw",
+    "codex",
     "mcp",
     "xquik",
     "openalex",
