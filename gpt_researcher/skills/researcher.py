@@ -345,25 +345,31 @@ class ResearchConductor:
                 sub_queries,
             )
 
-        # Using asyncio.gather to process the sub_queries asynchronously
-        try:
-            context = await asyncio.gather(
-                *[
-                    self._process_sub_query(sub_query, scraped_data, query_domains)
-                    for sub_query in sub_queries
-                ]
-            )
-            self.logger.info(f"Gathered context from {len(context)} sub-queries")
-            # Filter out empty results and join the context
-            context = [c for c in context if c]
-            if context:
-                combined_context = " ".join(context)
-                self.logger.info(f"Combined context size: {len(combined_context)}")
-                return combined_context
-            return []
-        except Exception as e:
-            self.logger.error(f"Error during web search: {e}", exc_info=True)
-            return []
+        context_results = await asyncio.gather(
+            *[
+                self._process_sub_query(sub_query, scraped_data, query_domains)
+                for sub_query in sub_queries
+            ],
+            return_exceptions=True,
+        )
+        self.logger.info(f"Gathered context from {len(context_results)} sub-queries")
+
+        context = []
+        for sub_query, result in zip(sub_queries, context_results):
+            if isinstance(result, Exception):
+                self.logger.error(
+                    f"Sub-query failed but other contexts will be preserved: {sub_query}: {result}",
+                    exc_info=result,
+                )
+                continue
+            if result:
+                context.append(result)
+
+        if context:
+            combined_context = " ".join(context)
+            self.logger.info(f"Combined context size: {len(combined_context)}")
+            return combined_context
+        return []
 
     def _get_mcp_strategy(self) -> str:
         """

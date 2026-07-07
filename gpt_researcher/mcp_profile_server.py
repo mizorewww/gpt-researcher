@@ -6,6 +6,7 @@ import os
 import re
 import sys
 import asyncio
+import json
 from importlib import metadata
 from json import loads
 from contextlib import redirect_stdout
@@ -106,6 +107,56 @@ def _invalid_report_reason(report: str, researcher: Any) -> str | None:
     if any(marker in report_lower for marker in EMPTY_REPORT_MARKERS):
         return "empty-source abstention report"
     return None
+
+
+async def _judge_report_quality(query: str, report: str, researcher: Any) -> dict[str, Any]:
+    """Use the configured smart LLM to decide whether a report is usable."""
+    hard_reason = _invalid_report_reason(report, researcher)
+    if hard_reason:
+        return {"ok": False, "reason": hard_reason, "confidence": 1.0}
+
+    from gpt_researcher.utils.llm import create_chat_completion
+
+    cfg = researcher.cfg
+    context_chars = len(_context_text(researcher))
+    sources_count = len(getattr(researcher, "visited_urls", []) or [])
+    prompt = (
+        "You are a strict quality gate for an autonomous research report. "
+        "Return ONLY compact JSON with keys ok (boolean), reason (string), confidence (0-1).\n\n"
+        "Mark ok=false if the report does not directly answer the query, lacks concrete source-grounded facts, "
+        "claims it could not gather sources, is mostly generic, omits major requested dimensions, or appears internally inconsistent. "
+        "Mark ok=true only when it is a usable sourced research answer.\n\n"
+        f"Query:\n{query}\n\n"
+        f"Sources count: {sources_count}\n"
+        f"Research context characters: {context_chars}\n\n"
+        f"Report excerpt:\n{report[:12000]}"
+    )
+    try:
+        response = await create_chat_completion(
+            messages=[{"role": "user", "content": prompt}],
+            model=cfg.smart_llm_model,
+            llm_provider=cfg.smart_llm_provider,
+            temperature=0,
+            max_tokens=300,
+            llm_kwargs=cfg.llm_kwargs,
+            cost_callback=researcher.add_costs,
+            reasoning_effort=getattr(cfg, "reasoning_effort", None),
+        )
+        cleaned = response.strip()
+        if cleaned.startswith("```"):
+            cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.IGNORECASE | re.DOTALL).strip()
+        verdict = json.loads(cleaned)
+        return {
+            "ok": bool(verdict.get("ok")),
+            "reason": str(verdict.get("reason") or "quality gate failed"),
+            "confidence": float(verdict.get("confidence", 0.0)),
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": f"quality judge failed: {type(exc).__name__}: {exc}",
+            "confidence": 0.0,
+        }
 
 
 def _profile(retriever: str | None = None) -> dict[str, Any]:
@@ -254,18 +305,19 @@ async def research_report(
     for attempt_number in range(1, mixed_attempts + 1):
         try:
             researcher, report = await run_once_with_timeout()
-            reason = _invalid_report_reason(report, researcher)
+            quality = await _judge_report_quality(query, report, researcher)
             attempts.append(
                 {
                     "attempt": attempt_number,
                     "retriever": mixed_retriever,
-                    "status": "invalid" if reason else "ok",
-                    "reason": reason,
+                    "status": "ok" if quality["ok"] else "invalid",
+                    "reason": None if quality["ok"] else quality["reason"],
+                    "quality": quality,
                     "sources_count": len(getattr(researcher, "visited_urls", []) or []),
                     "context_chars": len(_context_text(researcher)),
                 }
             )
-            if not reason:
+            if quality["ok"]:
                 break
         except Exception as exc:
             attempts.append(
@@ -280,13 +332,14 @@ async def research_report(
         fallback_used = True
         try:
             researcher, report = await run_once_with_timeout("tavily")
-            reason = _invalid_report_reason(report, researcher)
+            quality = await _judge_report_quality(query, report, researcher)
             attempts.append(
                 {
                     "attempt": 1,
                     "retriever": "tavily",
-                    "status": "invalid" if reason else "ok",
-                    "reason": reason,
+                    "status": "ok" if quality["ok"] else "invalid",
+                    "reason": None if quality["ok"] else quality["reason"],
+                    "quality": quality,
                     "sources_count": len(getattr(researcher, "visited_urls", []) or []),
                     "context_chars": len(_context_text(researcher)),
                 }

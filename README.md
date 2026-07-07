@@ -185,7 +185,7 @@ uvx --from . gpt-researcher
 
 Use `uvx --from .` while developing this repository, and bump the package version whenever the packaged MCP entry point changes so uv rebuilds the local package instead of reusing the previous tool environment. The packaged entry point automatically reads uv's `direct_url.json` metadata to find the `--from` checkout and load its `.env`; `GPT_RESEARCHER_PROFILE_DIR` can still override that path if needed. A bare `uvx gpt-researcher` resolves the currently published PyPI package, so it will not include local checkout changes until a release is published.
 
-The MCP `research_report` tool treats failed attempts and empty-source reports as unstable runs. It tries the configured mixed retriever profile twice by default, then falls back to `RETRIEVER=tavily` and returns `fallback_used` plus an `attempts` audit trail in the tool result.
+The MCP `research_report` tool treats failed attempts and low-quality reports as unstable runs. It uses the configured smart LLM as a quality gate, retries the mixed retriever profile twice by default, then falls back to `RETRIEVER=tavily` and returns `fallback_used` plus an `attempts` audit trail in the tool result.
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.
