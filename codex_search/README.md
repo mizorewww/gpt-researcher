@@ -136,7 +136,7 @@ uvx --from . gpt-researcher
 
 A bare `uvx gpt-researcher` installs the published PyPI package, not this checkout. Use `--from .` for local development unless the package has been released with this console entry point. When the packaged MCP entry point changes, bump the package version so uv rebuilds the local package instead of reusing the previous tool environment.
 
-The server loads credentials and model settings from `$GPT_RESEARCHER_PROFILE_DIR/.env`; the checked-in `.mcp.json` sets that profile directory to this checkout so API keys are loaded even if the MCP client does not launch from the repository root.
+The server loads credentials and model settings from the checkout passed to `uvx --from`, using uv's installed `direct_url.json` metadata. `$GPT_RESEARCHER_PROFILE_DIR` can override that path if needed, but the normal command `uvx --from /Users/aac6fef/Developer/gpt-researcher gpt-researcher` works even when launched outside the repository.
 
 Call the MCP tool with:
 

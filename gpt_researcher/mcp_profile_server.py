@@ -5,9 +5,12 @@ from __future__ import annotations
 import os
 import re
 import sys
+from importlib import metadata
+from json import loads
 from contextlib import redirect_stdout
 from pathlib import Path
 from typing import Any
+from urllib.parse import unquote, urlparse
 from uuid import uuid4
 
 from dotenv import load_dotenv
@@ -17,9 +20,27 @@ from mcp.server.fastmcp import FastMCP
 def _load_profile_env() -> Path:
     """Load `.env` from the configured profile directory."""
     profile_dir = os.getenv("GPT_RESEARCHER_PROFILE_DIR")
-    workdir = Path(profile_dir).expanduser().resolve() if profile_dir else Path.cwd()
+    workdir = Path(profile_dir).expanduser().resolve() if profile_dir else _source_profile_dir()
     load_dotenv(workdir / ".env")
     return workdir
+
+
+def _source_profile_dir() -> Path:
+    """Resolve the source checkout used by `uvx --from /path gpt-researcher`."""
+    try:
+        dist = metadata.distribution("gpt-researcher")
+        direct_url_file = next(
+            file for file in (dist.files or []) if str(file).endswith("direct_url.json")
+        )
+        direct_url = loads(dist.locate_file(direct_url_file).read_text())
+        parsed = urlparse(direct_url.get("url", ""))
+        if parsed.scheme == "file":
+            source = Path(unquote(parsed.path)).expanduser().resolve()
+            if (source / ".env").exists():
+                return source
+    except Exception:
+        pass
+    return Path.cwd()
 
 
 WORKDIR = _load_profile_env()

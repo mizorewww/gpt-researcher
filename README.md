@@ -183,7 +183,7 @@ The MCP server is also packaged as a local console entry point. From this checko
 uvx --from . gpt-researcher
 ```
 
-Use `uvx --from .` while developing this repository, and bump the package version whenever the packaged MCP entry point changes so uv rebuilds the local package instead of reusing the previous tool environment. The MCP profile also sets `GPT_RESEARCHER_PROFILE_DIR` so the packaged entry point loads this checkout's `.env` even when the MCP client starts it from another working directory. A bare `uvx gpt-researcher` resolves the currently published PyPI package, so it will not include local checkout changes until a release is published.
+Use `uvx --from .` while developing this repository, and bump the package version whenever the packaged MCP entry point changes so uv rebuilds the local package instead of reusing the previous tool environment. The packaged entry point automatically reads uv's `direct_url.json` metadata to find the `--from` checkout and load its `.env`; `GPT_RESEARCHER_PROFILE_DIR` can still override that path if needed. A bare `uvx gpt-researcher` resolves the currently published PyPI package, so it will not include local checkout changes until a release is published.
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.
