@@ -47,6 +47,9 @@ websockets = "^13.1"
 mcp = { version = ">=1.0.0", markers = "platform_system != 'Windows'" }
 langchain-mcp-adapters = ">=0.1.0"
 
+[tool.poetry.scripts]
+gpt-researcher = "gpt_researcher.mcp_profile_server:main"
+
 [build-system]
 requires = ["poetry-core"]
 build-backend = "poetry.core.masonry.api"
@@ -237,6 +240,9 @@ requirements-txt = [
     "scrapy",
     "selenium",
 ]
+
+[project.scripts]
+gpt-researcher = "gpt_researcher.mcp_profile_server:main"
 
 [dependency-groups]
 dev = [

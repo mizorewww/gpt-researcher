@@ -1,9 +1,12 @@
 {
   "mcpServers": {
     "gpt-researcher-codex-long": {
-      "command": ".venv/bin/python",
+      "command": "uvx",
       "args": [
-        "mcp_profile_server.py"
+        "--no-cache",
+        "--from",
+        ".",
+        "gpt-researcher"
       ],
       "env": {
         "RETRIEVER": "tavily,codex",

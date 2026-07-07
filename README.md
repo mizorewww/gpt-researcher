@@ -175,7 +175,15 @@ CODEX_SEARCH_RETRIEVER_TIMEOUT=300
 CODEX_SEARCH_RETRIEVER_CONCURRENCY=1
 ```
 
-For MCP clients, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`, which starts `mcp_profile_server.py` with the same profile and exposes the `research_report` tool.
+For MCP clients, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`, which starts the local `gpt-researcher` console entry point with the same profile and exposes the `profile_info` and `research_report` tools.
+
+The MCP server is also packaged as a local console entry point. From this checkout, validate it with:
+
+```bash
+uvx --no-cache --from . gpt-researcher
+```
+
+Use `uvx --no-cache --from .` while developing this repository. A bare `uvx gpt-researcher` resolves the currently published PyPI package, so it will not include local checkout changes until a release is published.
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.

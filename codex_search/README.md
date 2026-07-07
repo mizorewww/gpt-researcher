@@ -115,18 +115,26 @@ Performance note: a full `tavily,codex` run with Codex `plan-exec` on every gene
 
 ## MCP Profile
 
-This checkout includes `mcp_profile_server.py`, a local MCP stdio server that loads `.env` and exposes the `research_report` tool. The checked-in `.mcp.json` starts it as:
+This checkout includes a packaged MCP stdio server that loads `.env` and exposes `profile_info` plus `research_report`. The checked-in `.mcp.json` starts the local checkout through `uvx --no-cache --from .`:
 
 ```json
 {
   "mcpServers": {
     "gpt-researcher-codex-long": {
-      "command": ".venv/bin/python",
-      "args": ["mcp_profile_server.py"]
+      "command": "uvx",
+      "args": ["--no-cache", "--from", ".", "gpt-researcher"]
     }
   }
 }
 ```
+
+Validate the same entry point by listing tools with any MCP client, or start it directly:
+
+```sh
+uvx --no-cache --from . gpt-researcher
+```
+
+A bare `uvx gpt-researcher` installs the published PyPI package, not this checkout. Use `--no-cache --from .` for local development unless the package has been released with this console entry point.
 
 Call the MCP tool with:
 
