@@ -3,7 +3,6 @@
     "gpt-researcher-codex-long": {
       "command": "uvx",
       "args": [
-        "--no-cache",
         "--from",
         "/Users/aac6fef/Developer/gpt-researcher",
         "gpt-researcher"

@@ -115,14 +115,14 @@ Performance note: a full `tavily,codex` run with Codex `plan-exec` on every gene
 
 ## MCP Profile
 
-This checkout includes a packaged MCP stdio server that loads `.env` and exposes `profile_info` plus `research_report`. The checked-in `.mcp.json` starts the local checkout through `uvx --no-cache --from .`:
+This checkout includes a packaged MCP stdio server that loads `.env` and exposes `profile_info` plus `research_report`. The checked-in `.mcp.json` starts the local checkout through `uvx --from .`:
 
 ```json
 {
   "mcpServers": {
     "gpt-researcher-codex-long": {
       "command": "uvx",
-      "args": ["--no-cache", "--from", ".", "gpt-researcher"]
+      "args": ["--from", ".", "gpt-researcher"]
     }
   }
 }
@@ -131,10 +131,10 @@ This checkout includes a packaged MCP stdio server that loads `.env` and exposes
 Validate the same entry point by listing tools with any MCP client, or start it directly:
 
 ```sh
-uvx --no-cache --from . gpt-researcher
+uvx --from . gpt-researcher
 ```
 
-A bare `uvx gpt-researcher` installs the published PyPI package, not this checkout. Use `--no-cache --from .` for local development unless the package has been released with this console entry point.
+A bare `uvx gpt-researcher` installs the published PyPI package, not this checkout. Use `--from .` for local development unless the package has been released with this console entry point. When the packaged MCP entry point changes, bump the package version so uv rebuilds the local package instead of reusing the previous tool environment.
 
 The server loads credentials and model settings from `$GPT_RESEARCHER_PROFILE_DIR/.env`; the checked-in `.mcp.json` sets that profile directory to this checkout so API keys are loaded even if the MCP client does not launch from the repository root.
 
