@@ -175,7 +175,9 @@ CODEX_SEARCH_RETRIEVER_TIMEOUT=300
 CODEX_SEARCH_RETRIEVER_CONCURRENCY=1
 ```
 
-For MCP clients, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`, which starts the local `gpt-researcher` console entry point with the same profile and exposes the `profile_info` and `research_report` tools.
+For MCP clients, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`, which starts the local `gpt-researcher` console entry point with the same profile and exposes `profile_info`, `research_report`, `research_report_start`, and `research_report_status`.
+
+Use `research_report_start` plus repeated `research_report_status` polling for long reports in clients with short MCP tool timeouts. The synchronous `research_report` tool is kept for compatibility and short tasks.
 
 The MCP server is also packaged as a local console entry point. From this checkout, validate it with:
 
@@ -185,7 +187,7 @@ uvx --from . gpt-researcher
 
 Use `uvx --from .` while developing this repository, and bump the package version whenever the packaged MCP entry point changes so uv rebuilds the local package instead of reusing the previous tool environment. The packaged entry point automatically reads uv's `direct_url.json` metadata to find the `--from` checkout and load its `.env`; `GPT_RESEARCHER_PROFILE_DIR` can still override that path if needed. A bare `uvx gpt-researcher` resolves the currently published PyPI package, so it will not include local checkout changes until a release is published.
 
-The MCP `research_report` tool treats failed attempts and low-quality reports as unstable runs. It uses the configured smart LLM as a quality gate, retries the mixed retriever profile twice by default, then falls back to `RETRIEVER=tavily` and returns `fallback_used` plus an `attempts` audit trail in the tool result.
+The MCP report tools treat failed attempts and low-quality reports as unstable runs. They use the configured smart LLM as a quality gate, retry the mixed retriever profile twice by default, then fall back to `RETRIEVER=tavily`. Successful reports return `fallback_used` plus an `attempts` audit trail. If all attempts fail, the server writes a `.failed.json` audit file and returns structured failure metadata instead of saving a misleading Markdown report.
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.

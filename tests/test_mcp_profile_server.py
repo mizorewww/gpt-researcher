@@ -121,6 +121,38 @@ class TestMcpProfileServer(unittest.TestCase):
             self.assertIn("ValueError: retriever exploded", payload["attempts"][0]["reason"])
             self.assertTrue((output_dir / "broken query.failed.json").exists())
 
+    def test_research_report_start_and_status_return_failed_job(self):
+        import gpt_researcher
+
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            with (
+                patch.object(gpt_researcher, "GPTResearcher", FakeResearcher),
+                patch.object(mcp_profile_server, "OUTPUT_DIR", output_dir),
+                patch.dict(
+                    "os.environ",
+                    {
+                        "MCP_RESEARCH_MIXED_ATTEMPTS": "1",
+                        "RETRIEVER": "tavily,codex",
+                    },
+                    clear=False,
+                ),
+            ):
+                async def run_job():
+                    started = await mcp_profile_server.research_report_start("async market query")
+                    self.assertEqual(started["status"], "running")
+                    self.assertIn(started["job_id"], mcp_profile_server.RESEARCH_JOBS)
+                    await asyncio.sleep(0)
+                    return await mcp_profile_server.research_report_status(started["job_id"])
+
+                status = asyncio.run(run_job())
+
+            self.assertEqual(status["status"], "failed")
+            self.assertEqual(status["failure"]["status"], "failed")
+            self.assertEqual(status["failure"]["sources_count"], 0)
+            self.assertEqual(status["failure"]["visited_urls_count"], 1)
+            self.assertTrue((output_dir / "async market query.failed.json").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

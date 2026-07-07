@@ -7,6 +7,7 @@ import re
 import sys
 import asyncio
 import json
+import time
 from importlib import metadata
 from json import loads
 from contextlib import redirect_stdout
@@ -60,6 +61,8 @@ mcp = FastMCP(
         "For this checkout the default is Tavily + Codex long search."
     ),
 )
+
+RESEARCH_JOBS: dict[str, dict[str, Any]] = {}
 
 
 def _safe_filename(value: str) -> str:
@@ -300,14 +303,12 @@ def profile_info() -> dict[str, Any]:
     }
 
 
-@mcp.tool()
-async def research_report(
+async def _run_research_report(
     query: str,
     report_type: str = "research_report",
     tone: str = "objective",
     report_source: str = "web",
 ) -> dict[str, Any]:
-    """Run a GPT Researcher report using the active Tavily/Codex profile."""
     async def run_once(retriever_override: str | None = None):
         previous_retriever = _set_env_temporarily("RETRIEVER", retriever_override) if retriever_override else None
         try:
@@ -448,6 +449,90 @@ async def research_report(
         "profile": active_profile,
         "fallback_used": fallback_used,
         "attempts": attempts,
+    }
+
+
+@mcp.tool()
+async def research_report(
+    query: str,
+    report_type: str = "research_report",
+    tone: str = "objective",
+    report_source: str = "web",
+) -> dict[str, Any]:
+    """Run a GPT Researcher report synchronously using the active Tavily/Codex profile."""
+    return await _run_research_report(query, report_type, tone, report_source)
+
+
+@mcp.tool()
+async def research_report_start(
+    query: str,
+    report_type: str = "research_report",
+    tone: str = "objective",
+    report_source: str = "web",
+) -> dict[str, Any]:
+    """Start a long GPT Researcher report and return immediately with a job id."""
+    job_id = str(uuid4())
+    task = asyncio.create_task(_run_research_report(query, report_type, tone, report_source))
+    RESEARCH_JOBS[job_id] = {
+        "task": task,
+        "query": query,
+        "report_type": report_type,
+        "tone": tone,
+        "report_source": report_source,
+        "created_at": time.time(),
+    }
+    return {
+        "job_id": job_id,
+        "status": "running",
+        "query": query,
+        "message": "Research job started. Poll research_report_status with this job_id.",
+    }
+
+
+@mcp.tool()
+async def research_report_status(job_id: str) -> dict[str, Any]:
+    """Return status/result for a job created by research_report_start."""
+    job = RESEARCH_JOBS.get(job_id)
+    if not job:
+        return {"job_id": job_id, "status": "not_found", "error": "unknown research job id"}
+
+    task: asyncio.Task = job["task"]
+    elapsed_seconds = round(time.time() - float(job["created_at"]), 3)
+    if not task.done():
+        return {
+            "job_id": job_id,
+            "status": "running",
+            "elapsed_seconds": elapsed_seconds,
+            "query": job["query"],
+        }
+
+    try:
+        result = task.result()
+    except RuntimeError as exc:
+        error_text = str(exc)
+        try:
+            failure = json.loads(error_text)
+        except json.JSONDecodeError:
+            failure = {"status": "failed", "reason": error_text}
+        return {
+            "job_id": job_id,
+            "status": "failed",
+            "elapsed_seconds": elapsed_seconds,
+            "failure": failure,
+        }
+    except Exception as exc:
+        return {
+            "job_id": job_id,
+            "status": "error",
+            "elapsed_seconds": elapsed_seconds,
+            "error": f"{type(exc).__name__}: {exc}",
+        }
+
+    return {
+        "job_id": job_id,
+        "status": "completed",
+        "elapsed_seconds": elapsed_seconds,
+        "result": result,
     }
 
 

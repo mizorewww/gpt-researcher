@@ -3,6 +3,7 @@
     "gpt-researcher-codex-long": {
       "command": "uvx",
       "args": [
+        "--refresh",
         "--from",
         "/Users/aac6fef/Developer/gpt-researcher",
         "gpt-researcher"
