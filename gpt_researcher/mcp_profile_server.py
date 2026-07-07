@@ -13,10 +13,11 @@ from mcp.server.fastmcp import FastMCP
 
 
 def _load_profile_env() -> Path:
-    """Load `.env` from the caller's working tree when present."""
-    cwd = Path.cwd()
-    load_dotenv(cwd / ".env")
-    return cwd
+    """Load `.env` from the configured profile directory."""
+    profile_dir = os.getenv("GPT_RESEARCHER_PROFILE_DIR")
+    workdir = Path(profile_dir).expanduser().resolve() if profile_dir else Path.cwd()
+    load_dotenv(workdir / ".env")
+    return workdir
 
 
 WORKDIR = _load_profile_env()
@@ -69,6 +70,14 @@ def profile_info() -> dict[str, Any]:
     return {
         "workdir": str(WORKDIR),
         "RETRIEVER": os.getenv("RETRIEVER"),
+        "FAST_LLM": os.getenv("FAST_LLM"),
+        "SMART_LLM": os.getenv("SMART_LLM"),
+        "STRATEGIC_LLM": os.getenv("STRATEGIC_LLM"),
+        "EMBEDDING": os.getenv("EMBEDDING"),
+        "has_TAVILY_API_KEY": bool(os.getenv("TAVILY_API_KEY")),
+        "has_DEEPSEEK_API_KEY": bool(os.getenv("DEEPSEEK_API_KEY")),
+        "has_OPENROUTER_API_KEY": bool(os.getenv("OPENROUTER_API_KEY")),
+        "has_OPENAI_API_KEY": bool(os.getenv("OPENAI_API_KEY")),
         "CODEX_SEARCH_MODE": os.getenv("CODEX_SEARCH_MODE"),
         "CODEX_SEARCH_TIMEOUT": os.getenv("CODEX_SEARCH_TIMEOUT"),
         "CODEX_SEARCH_RETRIEVER_TIMEOUT": os.getenv("CODEX_SEARCH_RETRIEVER_TIMEOUT"),

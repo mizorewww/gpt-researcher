@@ -5,10 +5,11 @@
       "args": [
         "--no-cache",
         "--from",
-        ".",
+        "/Users/aac6fef/Developer/gpt-researcher",
         "gpt-researcher"
       ],
       "env": {
+        "GPT_RESEARCHER_PROFILE_DIR": "/Users/aac6fef/Developer/gpt-researcher",
         "RETRIEVER": "tavily,codex",
         "CODEX_SEARCH_MODE": "plan-exec",
         "CODEX_SEARCH_TIMEOUT": "300",

@@ -136,6 +136,8 @@ uvx --no-cache --from . gpt-researcher
 
 A bare `uvx gpt-researcher` installs the published PyPI package, not this checkout. Use `--no-cache --from .` for local development unless the package has been released with this console entry point.
 
+The server loads credentials and model settings from `$GPT_RESEARCHER_PROFILE_DIR/.env`; the checked-in `.mcp.json` sets that profile directory to this checkout so API keys are loaded even if the MCP client does not launch from the repository root.
+
 Call the MCP tool with:
 
 ```json
