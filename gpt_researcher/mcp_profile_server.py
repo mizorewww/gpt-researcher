@@ -11,6 +11,7 @@ import time
 from importlib import metadata
 from json import loads
 from contextlib import redirect_stdout
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import unquote, urlparse
@@ -53,6 +54,16 @@ EMPTY_REPORT_MARKERS = (
     "no sources were retrieved",
     "not able to produce a reliable, sourced report",
 )
+UNVERIFIED_MARKERS = (
+    "合理推断",
+    "大概率",
+    "缺乏实际",
+    "未直接披露",
+    "无法核实",
+    "cannot verify",
+    "unverified",
+)
+DEFAULT_RESEARCH_TIMEOUT_SECONDS = 1800
 
 mcp = FastMCP(
     "gpt-researcher-codex-long",
@@ -117,13 +128,54 @@ def _report_metrics(researcher: Any) -> dict[str, int]:
     }
 
 
+def _env_float(name: str, default: float) -> float:
+    value = os.getenv(name)
+    if not value:
+        return default
+    try:
+        parsed = float(value)
+    except ValueError:
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _current_date_context() -> str:
+    current_date = datetime.now(UTC).date().isoformat()
+    return (
+        f"Current date: {current_date} UTC. "
+        f"Dates on or before {current_date} are not future dates. "
+        "When judging market data, verify source grounding and completeness relative to this date."
+    )
+
+
+def _query_with_current_date(query: str) -> str:
+    return f"{_current_date_context()}\n\nUser query:\n{query}"
+
+
+def _job_timeout_seconds() -> float:
+    attempt_timeout = _env_float(
+        "MCP_RESEARCH_ATTEMPT_TIMEOUT",
+        DEFAULT_RESEARCH_TIMEOUT_SECONDS,
+    )
+    return _env_float("MCP_RESEARCH_JOB_TIMEOUT", attempt_timeout)
+
+
 def _invalid_report_reason(report: str, researcher: Any) -> str | None:
     report_text = (report or "").strip()
     if not _context_text(researcher).strip():
         return "empty research context"
+    metrics = _report_metrics(researcher)
+    min_sources = int(_env_float("MCP_RESEARCH_MIN_VISITED_URLS", 2))
+    min_context_chars = int(_env_float("MCP_RESEARCH_MIN_CONTEXT_CHARS", 2000))
+    if metrics["visited_urls_count"] < min_sources:
+        return f"too few visited URLs: {metrics['visited_urls_count']} < {min_sources}"
+    if metrics["context_chars"] < min_context_chars:
+        return f"too little research context: {metrics['context_chars']} < {min_context_chars}"
     report_lower = report_text.lower()
     if any(marker in report_lower for marker in EMPTY_REPORT_MARKERS):
         return "empty-source abstention report"
+    if any(marker.lower() in report_lower for marker in UNVERIFIED_MARKERS):
+        return "report contains explicit unverified/guessed-market-data markers"
     return None
 
 
@@ -141,6 +193,9 @@ async def _judge_report_quality(query: str, report: str, researcher: Any) -> dic
     prompt = (
         "You are a strict quality gate for an autonomous research report. "
         "Return ONLY compact JSON with keys ok (boolean), reason (string), confidence (0-1).\n\n"
+        f"{_current_date_context()} "
+        "Do not reject a report merely because your model priors think this date is in the future; "
+        "judge recency and future-date risk relative to the Current date above.\n\n"
         "Mark ok=false if the report does not directly answer the query, lacks concrete source-grounded facts, "
         "claims it could not gather sources, is mostly generic, omits major requested dimensions, or appears internally inconsistent. "
         "Mark ok=true only when it is a usable sourced research answer.\n\n"
@@ -185,6 +240,7 @@ def _profile(retriever: str | None = None) -> dict[str, Any]:
         "CODEX_SEARCH_RETRIEVER_TIMEOUT": os.getenv("CODEX_SEARCH_RETRIEVER_TIMEOUT"),
         "CODEX_SEARCH_RETRIEVER_CONCURRENCY": os.getenv("CODEX_SEARCH_RETRIEVER_CONCURRENCY"),
         "CODEX_SEARCH_MODEL": os.getenv("CODEX_SEARCH_MODEL"),
+        "MCP_RESEARCH_FALLBACK_RETRIEVER": os.getenv("MCP_RESEARCH_FALLBACK_RETRIEVER"),
     }
 
 
@@ -300,6 +356,9 @@ def profile_info() -> dict[str, Any]:
         "CODEX_SEARCH_REASONING_EFFORT": os.getenv("CODEX_SEARCH_REASONING_EFFORT"),
         "CODEX_SEARCH_SERVICE_TIER": os.getenv("CODEX_SEARCH_SERVICE_TIER"),
         "CODEX_SEARCH_SUPPORTS_WEBSOCKETS": os.getenv("CODEX_SEARCH_SUPPORTS_WEBSOCKETS"),
+        "MCP_RESEARCH_FALLBACK_RETRIEVER": os.getenv("MCP_RESEARCH_FALLBACK_RETRIEVER"),
+        "MCP_RESEARCH_MIN_VISITED_URLS": os.getenv("MCP_RESEARCH_MIN_VISITED_URLS"),
+        "MCP_RESEARCH_MIN_CONTEXT_CHARS": os.getenv("MCP_RESEARCH_MIN_CONTEXT_CHARS"),
     }
 
 
@@ -309,6 +368,8 @@ async def _run_research_report(
     tone: str = "objective",
     report_source: str = "web",
 ) -> dict[str, Any]:
+    effective_query = _query_with_current_date(query)
+
     async def run_once(retriever_override: str | None = None):
         previous_retriever = _set_env_temporarily("RETRIEVER", retriever_override) if retriever_override else None
         try:
@@ -335,7 +396,7 @@ async def _run_research_report(
                 }
 
                 researcher = GPTResearcher(
-                    query=query,
+                    query=effective_query,
                     report_type=report_type,
                     report_source=report_source,
                     tone=tone_map.get(tone, Tone.Objective),
@@ -349,7 +410,7 @@ async def _run_research_report(
                 _restore_env("RETRIEVER", previous_retriever)
 
     async def run_once_with_timeout(retriever_override: str | None = None):
-        timeout = float(os.getenv("MCP_RESEARCH_ATTEMPT_TIMEOUT", "900"))
+        timeout = _env_float("MCP_RESEARCH_ATTEMPT_TIMEOUT", DEFAULT_RESEARCH_TIMEOUT_SECONDS)
         async with asyncio.timeout(timeout):
             return await run_once(retriever_override)
 
@@ -390,15 +451,31 @@ async def _run_research_report(
                 }
             )
     else:
+        fallback_retriever = os.getenv("MCP_RESEARCH_FALLBACK_RETRIEVER", "").strip()
+        if not fallback_retriever:
+            fallback_used = False
+            active_profile = _profile(mixed_retriever)
+            task_id, failure_path, failure_payload = _save_failure_audit(
+                query=query,
+                report_type=report_type,
+                report_source=report_source,
+                tone=tone,
+                profile=active_profile,
+                fallback_used=fallback_used,
+                attempts=attempts,
+                researcher=researcher,
+            )
+            failure_payload["path"] = str(failure_path)
+            raise RuntimeError(json.dumps(failure_payload, ensure_ascii=False))
         fallback_used = True
         try:
-            researcher, report = await run_once_with_timeout("tavily")
+            researcher, report = await run_once_with_timeout(fallback_retriever)
             quality = await _judge_report_quality(query, report, researcher)
             metrics = _report_metrics(researcher)
             attempts.append(
                 {
                     "attempt": 1,
-                    "retriever": "tavily",
+                    "retriever": fallback_retriever,
                     "status": "ok" if quality["ok"] else "invalid",
                     "reason": None if quality["ok"] else quality["reason"],
                     "quality": quality,
@@ -416,7 +493,7 @@ async def _run_research_report(
                 }
             )
 
-    active_profile = _profile("tavily" if fallback_used else mixed_retriever)
+    active_profile = _profile(os.getenv("MCP_RESEARCH_FALLBACK_RETRIEVER") if fallback_used else mixed_retriever)
     if not accepted_report:
         task_id, failure_path, failure_payload = _save_failure_audit(
             query=query,
@@ -460,7 +537,9 @@ async def research_report(
     report_source: str = "web",
 ) -> dict[str, Any]:
     """Run a GPT Researcher report synchronously using the active Tavily/Codex profile."""
-    return await _run_research_report(query, report_type, tone, report_source)
+    timeout = _job_timeout_seconds()
+    async with asyncio.timeout(timeout):
+        return await _run_research_report(query, report_type, tone, report_source)
 
 
 @mcp.tool()
@@ -472,7 +551,13 @@ async def research_report_start(
 ) -> dict[str, Any]:
     """Start a long GPT Researcher report and return immediately with a job id."""
     job_id = str(uuid4())
-    task = asyncio.create_task(_run_research_report(query, report_type, tone, report_source))
+    timeout = _job_timeout_seconds()
+    task = asyncio.create_task(
+        asyncio.wait_for(
+            _run_research_report(query, report_type, tone, report_source),
+            timeout=timeout,
+        )
+    )
     RESEARCH_JOBS[job_id] = {
         "task": task,
         "query": query,
@@ -480,6 +565,7 @@ async def research_report_start(
         "tone": tone,
         "report_source": report_source,
         "created_at": time.time(),
+        "timeout_seconds": timeout,
     }
     return {
         "job_id": job_id,
@@ -503,6 +589,7 @@ async def research_report_status(job_id: str) -> dict[str, Any]:
             "job_id": job_id,
             "status": "running",
             "elapsed_seconds": elapsed_seconds,
+            "timeout_seconds": job.get("timeout_seconds"),
             "query": job["query"],
         }
 
@@ -518,13 +605,23 @@ async def research_report_status(job_id: str) -> dict[str, Any]:
             "job_id": job_id,
             "status": "failed",
             "elapsed_seconds": elapsed_seconds,
+            "timeout_seconds": job.get("timeout_seconds"),
             "failure": failure,
+        }
+    except TimeoutError:
+        return {
+            "job_id": job_id,
+            "status": "timeout",
+            "elapsed_seconds": elapsed_seconds,
+            "timeout_seconds": job.get("timeout_seconds"),
+            "error": "research job exceeded MCP_RESEARCH_JOB_TIMEOUT",
         }
     except Exception as exc:
         return {
             "job_id": job_id,
             "status": "error",
             "elapsed_seconds": elapsed_seconds,
+            "timeout_seconds": job.get("timeout_seconds"),
             "error": f"{type(exc).__name__}: {exc}",
         }
 

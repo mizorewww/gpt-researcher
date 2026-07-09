@@ -69,7 +69,7 @@ This first runs a no-search planning pass, then runs a search-enabled answer pas
 The model is configurable without editing code:
 
 ```sh
-CODEX_SEARCH_MODEL=gpt-5.5 CODEX_SEARCH_REASONING_EFFORT=medium CODEX_SEARCH_SERVICE_TIER=priority ./codex_search/codex_search.py "question"
+CODEX_SEARCH_MODEL=gpt-5.5 CODEX_SEARCH_REASONING_EFFORT=medium CODEX_SEARCH_SERVICE_TIER=fast ./codex_search/codex_search.py "question"
 ```
 
 Other supported knobs:
@@ -86,6 +86,8 @@ Other supported knobs:
 - `CODEX_SEARCH_CODEX_BIN`
 - `CODEX_SEARCH_CODEX_HOME`
 - `CODEX_SEARCH_TIMEOUT`
+
+When `CODEX_SEARCH_SERVICE_TIER=fast`, the helper also passes `features.fast_mode=true` to match current Codex Fast mode configuration.
 
 ## Auth Handling
 

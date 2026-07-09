@@ -6,7 +6,7 @@ using the Tavily API.
 
 import json
 import os
-from typing import Literal, Optional, Sequence
+from typing import Literal, Sequence
 
 import requests
 
@@ -107,18 +107,28 @@ class TavilySearch:
             # Search the query
             results = self._search(
                 self.query,
-                search_depth="basic",
+                search_depth=os.getenv("TAVILY_SEARCH_DEPTH", "advanced"),
                 max_results=max_results,
                 topic=self.topic,
                 include_domains=self.query_domains,
+                include_raw_content=os.getenv("TAVILY_INCLUDE_RAW_CONTENT", "true").lower()
+                in {"1", "true", "yes"},
             )
             sources = results.get("results", [])
             if not sources:
                 raise Exception("No results found with Tavily API search.")
             # Return the results
-            search_response = [
-                {"href": obj["url"], "body": obj["content"]} for obj in sources
-            ]
+            search_response = []
+            for obj in sources:
+                item = {
+                    "title": obj.get("title", ""),
+                    "href": obj["url"],
+                    "body": obj.get("content", ""),
+                }
+                raw_content = obj.get("raw_content")
+                if raw_content:
+                    item["raw_content"] = raw_content
+                search_response.append(item)
         except Exception as e:
             print(f"Error: {e}. Failed fetching sources. Resulting in empty response.")
             search_response = []

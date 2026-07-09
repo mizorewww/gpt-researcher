@@ -177,6 +177,8 @@ def build_base_cmd(args: argparse.Namespace, *, search_enabled: bool) -> list[st
         cmd.extend(["-c", f'model_reasoning_effort="{args.reasoning_effort}"'])
     if args.service_tier:
         cmd.extend(["-c", f'service_tier="{args.service_tier}"'])
+        if args.service_tier == "fast":
+            cmd.extend(["-c", "features.fast_mode=true"])
     cmd.extend(
         [
             "exec",

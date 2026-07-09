@@ -11,13 +11,23 @@
       "env": {
         "GPT_RESEARCHER_PROFILE_DIR": "/Users/aac6fef/Developer/gpt-researcher",
         "RETRIEVER": "tavily,codex",
-        "CODEX_SEARCH_MODE": "plan-exec",
+        "TAVILY_INCLUDE_RAW_CONTENT": "true",
+        "TAVILY_SEARCH_DEPTH": "advanced",
+        "COMPRESSION_FALLBACK_ON_ERROR": "true",
+        "MCP_RESEARCH_ATTEMPT_TIMEOUT": "1800",
+        "MCP_RESEARCH_JOB_TIMEOUT": "1800",
+        "MCP_RESEARCH_MIXED_ATTEMPTS": "2",
+        "MCP_RESEARCH_MIN_VISITED_URLS": "2",
+        "MCP_RESEARCH_MIN_CONTEXT_CHARS": "4000",
+        "MCP_RESEARCH_FALLBACK_RETRIEVER": "",
+        "CODEX_SEARCH_MODE": "search",
         "CODEX_SEARCH_TIMEOUT": "300",
         "CODEX_SEARCH_RETRIEVER_TIMEOUT": "300",
+        "CODEX_SEARCH_RETRIEVER_DEBUG": "true",
         "CODEX_SEARCH_RETRIEVER_CONCURRENCY": "1",
         "CODEX_SEARCH_MODEL": "gpt-5.5",
         "CODEX_SEARCH_REASONING_EFFORT": "medium",
-        "CODEX_SEARCH_SERVICE_TIER": "priority",
+        "CODEX_SEARCH_SERVICE_TIER": "fast",
         "CODEX_SEARCH_SUPPORTS_WEBSOCKETS": "false"
       }
     }

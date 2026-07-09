@@ -45,6 +45,7 @@ package-lock.json
 # Log files
 logs/
 run_logs/
+.tmp/
 *.orig
 *.log
 server_log.txt

@@ -15,6 +15,7 @@ Classes:
 """
 
 import asyncio
+import logging
 import os
 from typing import Optional
 
@@ -31,6 +32,8 @@ from ..prompts import PromptFamily
 from ..utils.costs import estimate_embedding_cost
 from ..vector_store import VectorStoreWrapper
 from .retriever import SearchAPIRetriever, SectionRetriever
+
+logger = logging.getLogger(__name__)
 
 
 class VectorstoreCompressor:
@@ -119,6 +122,17 @@ class ContextCompressor:
         self.similarity_threshold = os.environ.get("SIMILARITY_THRESHOLD", 0.35)
         self.prompt_family = prompt_family
 
+    def __direct_context(self, max_results: int) -> str:
+        direct_docs = [
+            Document(
+                page_content=doc.get('raw_content', ''),
+                metadata=doc
+            )
+            for doc in self.documents[:max_results]
+            if doc.get('raw_content')
+        ]
+        return self.prompt_family.pretty_print_docs(direct_docs, max_results)
+
     def __get_contextual_retriever(self):
         """Build the contextual compression retriever pipeline.
 
@@ -161,21 +175,24 @@ class ContextCompressor:
         # If total content is small, skip expensive compression and return directly
         if total_chars < chunk_threshold and len(self.documents) <= max_results:
             # Fast path: no compression needed
-            direct_docs = [
-                Document(
-                    page_content=doc.get('raw_content', ''),
-                    metadata=doc
-                )
-                for doc in self.documents[:max_results]
-            ]
-            return self.prompt_family.pretty_print_docs(direct_docs, max_results)
+            return self.__direct_context(max_results)
 
         # Standard path: use compression for large content
         compressed_docs = self.__get_contextual_retriever()
         if cost_callback:
             cost_callback(estimate_embedding_cost(model=OPENAI_EMBEDDING_MODEL, docs=self.documents))
-        relevant_docs = await asyncio.to_thread(compressed_docs.invoke, query, **self.kwargs)
-        return self.prompt_family.pretty_print_docs(relevant_docs, max_results)
+        try:
+            relevant_docs = await asyncio.to_thread(compressed_docs.invoke, query, **self.kwargs)
+            return self.prompt_family.pretty_print_docs(relevant_docs, max_results)
+        except Exception as exc:
+            if os.getenv("COMPRESSION_FALLBACK_ON_ERROR", "true").lower() in {"1", "true", "yes"}:
+                logger.warning(
+                    "Context compression failed; falling back to direct scraped content: %s",
+                    exc,
+                    exc_info=True,
+                )
+                return self.__direct_context(max_results)
+            raise
 
 
 class WrittenContentCompressor:

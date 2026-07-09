@@ -32,6 +32,7 @@ class CodexSearch:
         self.mode = os.getenv("CODEX_SEARCH_RETRIEVER_MODE", os.getenv("CODEX_SEARCH_MODE", "search"))
         self.model = os.getenv("CODEX_SEARCH_MODEL") or os.getenv("CODEX_MODEL")
         self.max_chars = int(os.getenv("CODEX_SEARCH_RETRIEVER_MAX_CHARS", "12000"))
+        self.debug = os.getenv("CODEX_SEARCH_RETRIEVER_DEBUG", "").lower() in {"1", "true", "yes"}
 
     def search(self, max_results: int = 5) -> list[dict[str, str]]:
         """Run Codex search and return GPT Researcher-compatible results."""
@@ -54,6 +55,8 @@ class CodexSearch:
             ]
             if self.model:
                 cmd.extend(["--model", self.model])
+            if self.debug:
+                cmd.append("--show-events")
 
             try:
                 completed = subprocess.run(
@@ -70,6 +73,12 @@ class CodexSearch:
                 if completed.returncode == 0 and completed.stdout.strip():
                     body = completed.stdout.strip()[: self.max_chars]
                     elapsed = time.monotonic() - started
+                    if self.debug:
+                        print(
+                            f"CodexSearch ok: mode={self.mode} elapsed={elapsed:.1f}s "
+                            f"chars={len(completed.stdout.strip())} query={self.query[:120]}",
+                            file=sys.stderr,
+                        )
                     return [
                         {
                             "title": f"Codex web search: {self.query[:80]}",
@@ -83,8 +92,8 @@ class CodexSearch:
             if attempt <= self.retries:
                 time.sleep(self.retry_delay)
 
-        if os.getenv("CODEX_SEARCH_RETRIEVER_DEBUG", "").lower() in {"1", "true", "yes"} and last_error:
-            print(f"CodexSearch failed: {last_error}")
+        if self.debug and last_error:
+            print(f"CodexSearch failed: mode={self.mode} query={self.query[:120]} error={last_error}", file=sys.stderr)
         return []
 
     def _build_query(self) -> str:

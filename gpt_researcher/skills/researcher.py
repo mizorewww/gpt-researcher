@@ -758,6 +758,7 @@ class ResearchConductor:
     async def _search_relevant_source_urls(self, query, query_domains: list | None = None):
         new_search_urls = []
         prefetched_content = []
+        snippet_fallback_content = []
         if query_domains is None:
             query_domains = []
 
@@ -770,6 +771,7 @@ class ResearchConductor:
             if url and raw_content and len(raw_content) > 100:
                 # Only raw_content signals that a retriever already fetched the full page.
                 # body is snippet-sized text for most web retrievers and still needs scraping.
+                self.researcher.visited_urls.add(url)
                 prefetched_content.append({
                     "url": url,
                     "raw_content": raw_content,
@@ -778,12 +780,19 @@ class ResearchConductor:
                 self.researcher.add_research_sources([{"url": url}])
             elif url:
                 new_search_urls.append(url)
+                body = result.get("body", "")
+                if body and len(body) > 100:
+                    snippet_fallback_content.append({
+                        "url": url,
+                        "raw_content": body,
+                        "title": result.get("title", ""),
+                    })
 
         # Get unique URLs
         new_search_urls = await self._get_new_urls(new_search_urls)
         random.shuffle(new_search_urls)
 
-        return new_search_urls, prefetched_content
+        return new_search_urls, prefetched_content, snippet_fallback_content
 
     async def _get_search_results_from_all_retrievers(self, query, query_domains: list | None = None):
         """Run the same query through every configured non-MCP retriever and merge results."""
@@ -859,7 +868,11 @@ class ResearchConductor:
         if query_domains is None:
             query_domains = []
 
-        new_search_urls, prefetched_content = await self._search_relevant_source_urls(sub_query, query_domains)
+        (
+            new_search_urls,
+            prefetched_content,
+            snippet_fallback_content,
+        ) = await self._search_relevant_source_urls(sub_query, query_domains)
 
         # Log the research process if verbose mode is on
         if self.researcher.verbose:
@@ -875,6 +888,11 @@ class ResearchConductor:
 
         # Merge pre-fetched content from retrievers that already provide full text
         scraped_content.extend(prefetched_content)
+        if not scraped_content and snippet_fallback_content:
+            self.logger.warning(
+                "Live scraping returned no usable content; falling back to search result snippets."
+            )
+            scraped_content.extend(snippet_fallback_content)
 
         if self.researcher.vector_store:
             self.researcher.vector_store.load(scraped_content)

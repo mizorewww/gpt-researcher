@@ -57,7 +57,7 @@ printf '%s\n' "Find current docs for GPT Researcher MCP usage" | ./codex_search/
 Choose a model via env:
 
 ```sh
-CODEX_SEARCH_MODEL=gpt-5.5 CODEX_SEARCH_REASONING_EFFORT=medium CODEX_SEARCH_SERVICE_TIER=priority ./codex_search/codex_search.py "Compare Tavily and SerpAPI support in GPT Researcher"
+CODEX_SEARCH_MODEL=gpt-5.5 CODEX_SEARCH_REASONING_EFFORT=medium CODEX_SEARCH_SERVICE_TIER=fast ./codex_search/codex_search.py "Compare Tavily and SerpAPI support in GPT Researcher"
 ```
 
 Write the final answer to a file:
@@ -70,7 +70,7 @@ Optional configuration knobs:
 
 - `CODEX_SEARCH_MODEL`, or `CODEX_MODEL`: model passed to `codex exec --model`.
 - `CODEX_SEARCH_REASONING_EFFORT`, or `CODEX_REASONING_EFFORT`: passed as `-c model_reasoning_effort="..."`.
-- `CODEX_SEARCH_SERVICE_TIER`, or `CODEX_SERVICE_TIER`: passed as `-c service_tier="..."`.
+- `CODEX_SEARCH_SERVICE_TIER`, or `CODEX_SERVICE_TIER`: passed as `-c service_tier="..."`. When set to `fast`, the helper also passes `-c features.fast_mode=true`, matching the current Codex Fast mode documentation.
 - `CODEX_SEARCH_MODEL_PROVIDER`: defaults to `chatgpt-http`.
 - `CODEX_SEARCH_PROVIDER_BASE_URL`: defaults to `https://chatgpt.com/backend-api/codex`.
 - `CODEX_SEARCH_SUPPORTS_WEBSOCKETS`: defaults to `false`, forcing HTTPS Responses transport instead of WebSocket.
@@ -89,10 +89,13 @@ The repository registers a `codex` retriever alongside the built-in retrievers. 
 
 ```sh
 RETRIEVER=tavily,codex
-CODEX_SEARCH_MODE=plan-exec
+CODEX_SEARCH_MODE=search
 CODEX_SEARCH_TIMEOUT=300
 CODEX_SEARCH_RETRIEVER_TIMEOUT=300
 CODEX_SEARCH_RETRIEVER_CONCURRENCY=1
+CODEX_SEARCH_MODEL=gpt-5.5
+CODEX_SEARCH_REASONING_EFFORT=medium
+CODEX_SEARCH_SERVICE_TIER=fast
 ```
 
 GPT Researcher treats Tavily and Codex as peer search tools:
@@ -111,7 +114,7 @@ Run a report with the current `.env` profile:
 .venv/bin/python cli.py "调查上周的美股市场,调查不同板块的表现,并说明详细逻辑" --report_type research_report --tone objective --report_source web --no-pdf --no-docx
 ```
 
-Performance note: a full `tavily,codex` run with Codex `plan-exec` on every generated sub-query produced a higher-quality report in local testing, but took about 14 minutes. Use this profile when quality matters more than latency.
+Performance note: `search` mode is the default stability profile. `plan-exec` first asks Codex to plan and then runs a search-enabled pass, so every generated GPT Researcher sub-query can become two Codex CLI invocations. Use it only for targeted one-off searches where the extra latency is acceptable.
 
 ## MCP Profile
 
@@ -138,7 +141,7 @@ A bare `uvx gpt-researcher` installs the published PyPI package, not this checko
 
 The server loads credentials and model settings from the checkout passed to `uvx --from`, using uv's installed `direct_url.json` metadata. `$GPT_RESEARCHER_PROFILE_DIR` can override that path if needed, but the normal command `uvx --from /Users/aac6fef/Developer/gpt-researcher gpt-researcher` works even when launched outside the repository.
 
-`research_report` is guarded for instability: it uses the configured smart LLM as a quality gate, retries the configured mixed profile twice by default, and then falls back to Tavily-only when mixed output remains low quality. The result includes `fallback_used` and an `attempts` list so callers can see whether Codex was retried or bypassed.
+`research_report` is guarded for instability: it uses the configured smart LLM as a quality gate and retries the configured mixed profile twice by default. Fallback is disabled unless `MCP_RESEARCH_FALLBACK_RETRIEVER` is explicitly set, because a weak single-source fallback can otherwise accept guessed market data. The result includes `fallback_used` and an `attempts` list so callers can see whether the mixed profile was retried or bypassed.
 
 Call the MCP tool with:
 
