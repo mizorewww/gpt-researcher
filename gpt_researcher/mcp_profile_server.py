@@ -324,9 +324,6 @@ def _invalid_evidence_reason(researcher: Any) -> str | None:
     if metrics["context_chars"] < min_context_chars:
         return f"too little research context: {metrics['context_chars']} < {min_context_chars}"
 
-    work_items = getattr(researcher, "research_work_items", None)
-    if work_items is not None and len(work_items) != 3:
-        return f"research planner produced {len(work_items)} work items instead of 3"
     evidence_metrics = getattr(researcher, "evidence_metrics", {})
     if isinstance(evidence_metrics, dict) and evidence_metrics:
         minimum_per_item = int(
@@ -344,13 +341,6 @@ def _invalid_evidence_reason(researcher: Any) -> str | None:
                     "insufficient HTTP evidence for research work items: "
                     f"{insufficient}; each requires {minimum_per_item}"
                 )
-        if "codex" in os.getenv("RETRIEVER", "").casefold():
-            if int(evidence_metrics.get("codex_initial_calls", 0) or 0) != 3:
-                return (
-                    "the three initial work items did not each attempt Codex retrieval"
-                )
-            if int(evidence_metrics.get("active_codex_peak", 0) or 0) != 3:
-                return "the three initial Codex calls did not overlap"
     return None
 
 
@@ -925,7 +915,7 @@ async def _run_research_report(
             )
         research_params["query"] = (
             f"{effective_query}\n\n"
-            "The research planner validated the following three work items. The final report "
+            "The research planner validated the following work items. The final report "
             "must explicitly satisfy every coverage tag and evidence requirement; do not omit "
             "items merely because the user query summarized them broadly:\n"
             f"{json.dumps(serialized_plan, ensure_ascii=False, indent=2)}"
@@ -1106,21 +1096,13 @@ async def _run_research_report(
         for item in work_items
         if hasattr(item, "to_dict") or isinstance(item, dict)
     ]
-    codex_required = "codex" in selected_retriever.casefold()
     quality_gate_passed = bool(
         accepted_report
         and final_quality
         and final_quality.get("ok")
-        and len(serialized_work_items) == 3
+        and serialized_work_items
         and int(evidence_metrics.get("unique_http_sources", 0) or 0)
         >= int(evidence_metrics.get("minimum_http_sources", 2) or 2)
-        and (
-            not codex_required
-            or (
-                int(evidence_metrics.get("codex_initial_calls", 0) or 0) == 3
-                and int(evidence_metrics.get("active_codex_peak", 0) or 0) == 3
-            )
-        )
         and bool(evidence_metrics.get("quality_gate_passed"))
     )
 

@@ -364,6 +364,15 @@ class ConductorPlanningTests(unittest.IsolatedAsyncioTestCase):
         self.assertLessEqual(len(compact), 380)
         self.assertEqual(conductor._lightweight_web_retriever_queries(query), [compact])
 
+    def test_planner_work_item_count_is_not_forced_to_stress_test_width(self):
+        conductor = ResearchConductor(SimpleNamespace())
+
+        work_items = conductor._normalize_work_items(
+            ["one sufficient evidence lane"], "generic research request"
+        )
+
+        self.assertEqual([item.query for item in work_items], ["one sufficient evidence lane"])
+
     def test_generic_gap_followups_preserve_each_work_item(self):
         conductor = ResearchConductor(SimpleNamespace())
         work_items = conductor._normalize_work_items([], "generic research request")

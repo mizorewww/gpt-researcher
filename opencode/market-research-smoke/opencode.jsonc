@@ -1,0 +1,41 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "model": "deepseek/deepseek-v4-pro",
+  "default_agent": "research-coordinator",
+  "permission": {
+    "*": "deny",
+    "skill": "allow",
+    "task": "allow",
+    "gpt-researcher-codex-long_*": "allow",
+    "yfinance_*": "allow"
+  },
+  "mcp": {
+    "gpt-researcher-codex-long": {
+      "type": "local",
+      "command": [
+        "uv",
+        "run",
+        "--directory",
+        "../..",
+        "gpt-researcher"
+      ],
+      "environment": {
+        "CODEX_SEARCH_MODE": "search",
+        "CODEX_SEARCH_RETRIEVER_MODE": "search"
+      },
+      "timeout": 3000000,
+      "enabled": true
+    },
+    "yfinance": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "--from",
+        "yfinance-market-mcp==0.3.3",
+        "yfinance-mcp"
+      ],
+      "timeout": 120000,
+      "enabled": true
+    }
+  }
+}

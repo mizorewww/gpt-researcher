@@ -159,7 +159,7 @@ report = await researcher.write_report()
 
 This section documents GPT Researcher's direct Python, CLI, and MCP backend. It is independent of the OpenCode-native workflow system described below. Clients may choose this backend API, but its endpoints and lifecycle are not a required OpenCode workflow protocol.
 
-This checkout includes a bounded, concurrent Tavily + Codex research profile. A report is planned into exactly three initial structured work items, and each work item makes one initial Codex call; those three calls run concurrently. After the initial evidence is merged, one bounded gap-check round may issue at most three additional Codex-backed follow-up queries concurrently. A report therefore makes exactly three initial Codex calls and at most six Codex calls in total, while never running more than three at once. Writer or judge retries do not repeat the completed retrieval stage.
+This checkout includes a bounded, concurrent Tavily + Codex research profile. A report preserves up to three distinct work items from its planner; if the planner returns no usable item, three domain-neutral fallback lanes are used. Work items run concurrently and may each use Codex. After the initial evidence is merged, one bounded gap-check round may issue at most three additional Codex-backed follow-up queries concurrently. A report therefore makes at most six Codex calls while never running more than three at once. Concurrency shape is recorded as telemetry, not treated as a report-quality requirement. Writer or judge retries do not repeat the completed retrieval stage.
 
 One-line local report command:
 
@@ -204,7 +204,7 @@ CODEX_SEARCH_SERVICE_TIER=fast
 
 When `CODEX_SEARCH_SERVICE_TIER=fast`, the helper passes both `service_tier="fast"` and `features.fast_mode=true` to Codex CLI. `plan-exec` is still available for one-off deep searches, but it doubles Codex CLI invocations per generated sub-query and is not the default stability profile.
 
-The tested profile is `search + medium + fast`, with up to `12` source-addressable results retained from each Codex call. The MCP coordinator admits at most three isolated report workers and queues at most nine more jobs. Each report can make up to six Codex calls over its lifetime (three initial plus at most three follow-ups), but its per-report semaphore allows only three simultaneous Codex processes. The cross-process slot pool therefore enforces a machine-wide ceiling of nine simultaneous Codex processes across the three workers. A worker uses at most four ordinary retrievers and five scrapers. Every checkout and installed runner shares `~/.gpt-researcher/slots` by default; set `GPT_RESEARCHER_GLOBAL_SLOT_ROOT` only when all coordinator processes use the same alternative writable directory.
+The tested profile is `search + medium + fast`, with up to `12` source-addressable results retained from each Codex call. The MCP coordinator admits at most three isolated report workers and queues at most nine more jobs. Each report can make up to six Codex calls over its lifetime, but its per-report semaphore allows only three simultaneous Codex processes. The cross-process slot pool therefore enforces a machine-wide ceiling of nine simultaneous Codex processes across the three workers. A worker uses at most four ordinary retrievers and five scrapers. Every checkout shares `~/.gpt-researcher/slots` by default; set `GPT_RESEARCHER_GLOBAL_SLOT_ROOT` only when all coordinator processes use the same alternative writable directory.
 
 For clients that explicitly choose the direct GPT Researcher MCP API, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`. It starts this checkout with `uv run --directory ...` and exposes:
 
@@ -228,38 +228,20 @@ uv run --directory . gpt-researcher
 
 Each job writes a UUID-scoped, atomic audit directory. Coverage and unique HTTP evidence gates fail closed: failed jobs retain their spec, status, events, stderr, result, and manifest audit without publishing a misleading successful report. Terminal jobs are retained for 72 hours by default; running jobs found after a coordinator restart become `interrupted`.
 
-### OpenCode-native research workflows
+### OpenCode orchestration
 
-Create an OpenCode-native workflow whose `AGENTS.md` contains the task context, while its agents, skills, command, schemas, and MCP configuration define the domain-specific investigation:
-
-```bash
-scripts/research_workflow.sh init company-intelligence
-scripts/research_workflow.sh validate research_workflows/company-intelligence
-scripts/research_workflow.sh run research_workflows/company-intelligence \
-  --input 'Investigate the company, its market, competitors, evidence, and risks.'
-```
-
-See the [generic workflow guide](docs/GENERIC_RESEARCH_WORKFLOWS.md). The generic runner owns process and session scheduling, isolated snapshots, deny-by-default permissions, per-replica tool-budget configuration with aggregate enforcement, schemas, manifests, deadlines, and process cleanup; it contains no market-specific protocol. A workflow does not need to call `profile_info` or any `research_report_*` tool unless its own MCP choice genuinely requires that direct backend.
-
-`research_workflows/market-daily` is an example workflow. Its `AGENTS.md` contains only the market-report task context, while its agents and skill use the pinned, community-maintained, non-official `yfinance-market-mcp` package for structured Yahoo Finance data and Tavily MCP for independent web evidence. Generate and statically validate the complete configuration without calling a model:
+OpenCode can use GPT Researcher as an ordinary MCP tool alongside other MCPs. There is no project-specific Python runner, workflow schema, or validator. The example in [`opencode/market-research-smoke`](opencode/market-research-smoke/) combines this checkout's GPT Researcher MCP with a Yahoo Finance MCP; its market requirements exist only in `AGENTS.md`, while the agents and skill remain generic.
 
 ```bash
-scripts/research_workflow.sh validate research_workflows/market-daily \
-  --input '{"query":"生成完整市场日报","target_date":"2026-07-10","timezone":"Asia/Singapore"}'
+set -a; source .env; set +a
+opencode run --pure \
+  --dir "$PWD/opencode/market-research-smoke" \
+  --command research \
+  --agent research-coordinator \
+  '目标日期为 2026-07-10，时区 Asia/Singapore。生成完整市场日报。'
 ```
 
-Run one report, or use the same generic runner to attach three simultaneous sessions:
-
-```bash
-scripts/research_workflow.sh run research_workflows/market-daily \
-  --input '{"query":"生成完整市场日报","target_date":"2026-07-10","timezone":"Asia/Singapore"}'
-
-scripts/research_workflow.sh load-test research_workflows/market-daily \
-  --input '{"query":"生成完整市场日报","target_date":"2026-07-10","timezone":"Asia/Singapore"}' \
-  --replicas 3
-```
-
-The live default uses `deepseek/deepseek-v4-pro` and requires `DEEPSEEK_API_KEY` plus `TAVILY_API_KEY`. Market coverage is checked by the workflow-owned report validator, not by a special harness or prescribed MCP call sequence. See [the market workflow guide](docs/OPENCODE_MCP_WORKFLOW.md).
+To create a different investigation, copy that directory and replace `AGENTS.md`; change `opencode.jsonc` only when the MCP set changes. See the [OpenCode MCP guide](docs/OPENCODE_MCP_WORKFLOW.md).
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.

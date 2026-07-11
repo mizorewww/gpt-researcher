@@ -105,7 +105,7 @@ CODEX_SEARCH_REASONING_EFFORT=medium
 CODEX_SEARCH_SERVICE_TIER=fast
 ```
 
-GPT Researcher plans exactly three initial structured research work items and executes them concurrently. Each initial work item makes one Codex call, so every report starts with exactly three concurrent Codex calls. Within each work item, Tavily and Codex are peer search tools:
+GPT Researcher preserves up to three structured work items from its planner and executes them concurrently. If planning returns no usable item, it creates three domain-neutral fallback lanes. When Codex is configured, each work item may use it alongside Tavily as a peer search tool:
 
 1. Planning uses a lightweight retriever and does not call Codex serially in advance.
 2. Each work-item query is sent to every configured non-MCP retriever.
@@ -115,7 +115,7 @@ GPT Researcher plans exactly three initial structured research work items and ex
 6. A coverage/conflict check may launch one follow-up round of at most three concurrent Codex-backed gap queries.
 7. The final report writer receives one combined evidence pool.
 
-This yields exactly three initial Codex calls and at most six Codex calls over the lifetime of one report. The per-report semaphore remains `3`, so the initial calls or follow-up calls can overlap three at a time, but a report never runs more than three Codex processes simultaneously. `CODEX_SEARCH_MAX_RESULTS=12` retains up to twelve source-addressable results from each call. This is intentionally different from using Codex as a separate report writer: Codex is a search retriever here, while GPT Researcher still owns planning, compression, and final report writing.
+This yields at most three initial Codex calls and at most six Codex calls over the lifetime of one report. The per-report semaphore remains `3`, so initial calls or follow-up calls can overlap three at a time, but overlap is telemetry rather than a success condition. `CODEX_SEARCH_MAX_RESULTS=12` retains up to twelve source-addressable results from each call. This is intentionally different from using Codex as a separate report writer: Codex is a search retriever here, while GPT Researcher still owns planning, compression, and final report writing.
 
 Run a report with the current `.env` profile:
 
@@ -125,9 +125,9 @@ Run a report with the current `.env` profile:
 
 Performance note: `search` mode is the default stability profile. `plan-exec` first asks Codex to plan and then runs a search-enabled pass, so every generated GPT Researcher sub-query can become two Codex CLI invocations. Use it only for targeted one-off searches where the extra latency is acceptable.
 
-The OpenCode workflow runner is a separate, domain-neutral execution path. Use
-`scripts/research_workflow.sh` and follow the operator guide at
-[`docs/GENERIC_RESEARCH_WORKFLOWS.md`](../docs/GENERIC_RESEARCH_WORKFLOWS.md).
+OpenCode can orchestrate this MCP alongside other tools without an additional
+runner. See the native example and usage guide in
+[`docs/OPENCODE_MCP_WORKFLOW.md`](../docs/OPENCODE_MCP_WORKFLOW.md).
 
 ## MCP Profile
 
@@ -154,7 +154,7 @@ uv run --directory . gpt-researcher
 
 The server loads credentials and model settings from `$GPT_RESEARCHER_PROFILE_DIR`, normally the same checkout passed to `--directory`.
 
-Long reports should use `research_report_start`, `research_reports_status`, and `research_report_result`; `research_report_cancel` terminates the isolated worker process tree. `research_report_status` remains available for one job, and synchronous `research_report` is retained for short requests. The coordinator runs at most three report workers and queues at most nine jobs. Each worker makes exactly three initial Codex calls and may make at most three more in one follow-up round, but runs no more than three simultaneously; the global slot pool caps the machine at nine simultaneous Codex processes.
+Long reports should use `research_report_start`, `research_reports_status`, and `research_report_result`; `research_report_cancel` terminates the isolated worker process tree. `research_report_status` remains available for one job, and synchronous `research_report` is retained for short requests. The coordinator runs at most three report workers and queues at most nine jobs. Each worker may make up to three initial Codex calls and up to three more in one follow-up round, but runs no more than three simultaneously; the global slot pool caps the machine at nine simultaneous Codex processes.
 
 Call the MCP tool with:
 

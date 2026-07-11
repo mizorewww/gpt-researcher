@@ -134,7 +134,7 @@ class ResearchConductor:
             ),
             "codex_runs": [run.copy() for run in self._codex_run_metadata],
             "quality_gate_passed": (
-                len(self.research_work_items) == 3
+                bool(self.research_work_items)
                 and len(source_urls) >= minimum_total
                 and all(
                     count >= minimum_per_item
@@ -181,7 +181,7 @@ class ResearchConductor:
         )
 
         # Planning uses lightweight retrievers only. Running Codex here would add
-        # a hidden serial call before the three deliberate research work items.
+        # a hidden serial call before the deliberate research work items.
         search_results = await self._get_search_results_from_all_retrievers(
             query,
             query_domains,
@@ -219,7 +219,7 @@ class ResearchConductor:
         )
         self.research_work_items = self._normalize_work_items(outline, query)
         self.logger.info(
-            "Research outline normalized to three work items: %s",
+            "Research outline normalized to work items: %s",
             [item.to_dict() for item in self.research_work_items],
         )
         # Keep the longstanding list[str] return contract for external callers.
@@ -228,7 +228,7 @@ class ResearchConductor:
     def _normalize_work_items(
         self, outline: Any, original_query: str
     ) -> list[ResearchWorkItem]:
-        """Convert arbitrary planner output into exactly three distinct work items."""
+        """Convert planner output into at most three distinct work items."""
 
         if isinstance(outline, dict):
             candidates = outline.get("work_items") or outline.get("queries") or []
@@ -291,26 +291,20 @@ class ResearchConductor:
             if len(normalized) == 3:
                 break
 
-        for query, tags, requirements in fallback_specs:
-            if len(normalized) == 3:
-                break
-            key = self._query_key(query)
-            if key in seen_queries:
-                continue
-            normalized.append(
-                ResearchWorkItem(
-                    query=query,
-                    coverage_tags=tags,
-                    evidence_requirements=requirements,
-                    priority=len(normalized) + 1,
+        if not normalized:
+            for query, tags, requirements in fallback_specs:
+                key = self._query_key(query)
+                if key in seen_queries:
+                    continue
+                normalized.append(
+                    ResearchWorkItem(
+                        query=query,
+                        coverage_tags=tags,
+                        evidence_requirements=requirements,
+                        priority=len(normalized) + 1,
+                    )
                 )
-            )
-            seen_queries.add(key)
-
-        # The fallbacks are deliberately distinct, so reaching anything other
-        # than three indicates a programming error rather than planner quality.
-        if len(normalized) != 3:
-            raise RuntimeError("Research planning must yield exactly three work items")
+                seen_queries.add(key)
         return normalized
 
     @staticmethod
@@ -347,7 +341,7 @@ class ResearchConductor:
             "phase": "retrieval",
             "progress": {
                 "completed": self._research_progress_completed,
-                "total": 3,
+                "total": len(self.research_work_items),
             },
             "active_codex": self._active_codex,
             "active_codex_peak": self._active_codex_peak,
@@ -474,7 +468,7 @@ class ResearchConductor:
                 ).load()
             if self.researcher.vector_store:
                 self.researcher.vector_store.load(document_data)
-            # Plan and search the web exactly once. Reuse those same three work
+            # Plan and search the web exactly once. Reuse those same work
             # items to select local context instead of invoking the entire
             # research pipeline a second time (which previously scheduled an
             # extra Codex/gap wave for hybrid reports).
@@ -587,8 +581,7 @@ class ResearchConductor:
         """
         self.logger.info(f"Starting vectorstore search for query: {query}")
         context = []
-        # The planner always returns exactly three queries. Do not append the
-        # original query as a hidden fourth unit of work.
+        # Do not append the original query as a hidden additional unit of work.
         sub_queries = await self.plan_research(query)
 
         if self.researcher.verbose:
@@ -689,8 +682,8 @@ class ResearchConductor:
                     f"MCP results cached: {len(mcp_context)} total context entries"
                 )
 
-        # Plan exactly three work items. The original query is intentionally not
-        # appended; doing so previously created an unbounded fourth Codex call.
+        # Plan bounded work items. The original query is intentionally not
+        # appended as an extra retriever call.
         sub_queries = await self.plan_research(query, query_domains)
         self.logger.info(f"Generated sub-queries: {sub_queries}")
         work_items = self.research_work_items or self._normalize_work_items(

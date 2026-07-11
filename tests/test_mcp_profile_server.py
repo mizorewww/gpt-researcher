@@ -109,6 +109,35 @@ class TestMcpProfileServer(unittest.TestCase):
         self.assertEqual(metrics["visited_urls_count"], 1)
         self.assertEqual(metrics["http_sources_count"], 0)
 
+    def test_evidence_gate_does_not_require_a_concurrency_shape(self):
+        researcher = SimpleNamespace(
+            context="grounded context " * 30,
+            research_work_items=[SimpleNamespace(query="one lane")],
+            evidence_items=[
+                EvidenceItem(claim="First", source_url="https://example.com/one"),
+                EvidenceItem(claim="Second", source_url="https://example.com/two"),
+            ],
+            evidence_metrics={
+                "minimum_http_sources_per_work_item": 1,
+                "per_work_item_http_sources": {"1": 2},
+                "codex_initial_calls": 1,
+                "active_codex_peak": 1,
+            },
+        )
+
+        with patch.dict(
+            "os.environ",
+            {
+                "MCP_RESEARCH_MIN_HTTP_SOURCES": "2",
+                "MCP_RESEARCH_MIN_CONTEXT_CHARS": "10",
+                "RETRIEVER": "tavily,codex",
+            },
+            clear=False,
+        ):
+            reason = mcp_profile_server._invalid_evidence_reason(researcher)
+
+        self.assertIsNone(reason)
+
     def test_frontmatter_separates_sources_from_visited_urls(self):
         markdown = mcp_profile_server._frontmatter(
             task_id="task-1",

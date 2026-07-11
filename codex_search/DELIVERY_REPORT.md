@@ -126,7 +126,7 @@ HTTPS-only search smoke: 24.80s, output cited https://developers.openai.com/code
 
 The long-report profile uses `search + medium + fast`, retains up to `12` source-addressable results per Codex call, and has two explicit concurrency layers:
 
-- Exactly three initial structured work items per report, each making one Codex call; the three initial calls run concurrently.
+- Up to three initial structured work items per report; available work items run concurrently, while the observed overlap is telemetry rather than a quality gate.
 - After initial evidence merging, at most one follow-up round can add up to three concurrent Codex-backed gap queries. This makes the per-report lifetime bound six calls while retaining a simultaneous per-report ceiling of three.
 - At most three isolated report workers run together, and the cross-process slot pool caps the machine at nine simultaneous Codex processes.
 - Four ordinary retrievers and five scraper workers inside each report worker.
@@ -134,16 +134,8 @@ The long-report profile uses `search + medium + fast`, retains up to `12` source
 
 The local MCP entry point is launched from the checkout with `uv run --directory ... gpt-researcher`. Long clients use `research_report_start`, batch long-poll with `research_reports_status`, fetch terminal data with `research_report_result`, and can terminate the worker tree with `research_report_cancel`.
 
-OpenCode workflows use the independent, domain-neutral `gptr-workflow` runner.
-Each workflow owns its task context, agents, skills, MCP configuration, schemas,
-and validators; the runner owns isolation, concurrent sessions, tool budgets,
-audit, timeout, and process cleanup. Validate or load-test any workflow with:
-
-```sh
-scripts/research_workflow.sh validate research_workflows/<name> --input 'complete request'
-scripts/research_workflow.sh load-test research_workflows/<name> --input 'complete request' --replicas 3
-```
-
-See [`docs/GENERIC_RESEARCH_WORKFLOWS.md`](../docs/GENERIC_RESEARCH_WORKFLOWS.md)
-for the reusable workflow contract and [`docs/OPENCODE_MCP_WORKFLOW.md`](../docs/OPENCODE_MCP_WORKFLOW.md)
-for the market workflow as one configured example.
+OpenCode uses this server as an ordinary MCP tool. The native example in
+`opencode/market-research-smoke` places task requirements in `AGENTS.md` and
+keeps the coordinator and parallel-research skill generic; Yahoo Finance is a
+separate peer MCP selected by OpenCode when structured market data is useful.
+See [`docs/OPENCODE_MCP_WORKFLOW.md`](../docs/OPENCODE_MCP_WORKFLOW.md).

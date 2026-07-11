@@ -7,7 +7,6 @@ license = "MIT"
 readme = "README.md"
 include = [
     { path = "codex_search", format = ["sdist", "wheel"] },
-    { path = "research_workflows", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.dependencies]
@@ -255,7 +254,6 @@ requirements-txt = [
 
 [project.scripts]
 gpt-researcher = "gpt_researcher.mcp_profile_server:main"
-gptr-workflow = "gpt_researcher.opencode_workflow.cli:main"
 
 [dependency-groups]
 dev = [
