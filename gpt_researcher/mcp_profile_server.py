@@ -27,6 +27,7 @@ from gpt_researcher.job_manager import (
     JobQueueFullError,
     atomic_write_json,
     atomic_write_text,
+    default_global_slot_root,
     read_json,
 )
 
@@ -2421,6 +2422,13 @@ def profile_info() -> dict[str, Any]:
             "MCP_RESEARCH_MAX_CONCURRENT_JOBS", "3"
         ),
         "MCP_RESEARCH_MAX_QUEUED_JOBS": os.getenv("MCP_RESEARCH_MAX_QUEUED_JOBS", "9"),
+        "MCP_RESEARCH_GLOBAL_CONCURRENCY": os.getenv(
+            "MCP_RESEARCH_GLOBAL_CONCURRENCY", "3"
+        ),
+        "MCP_RESEARCH_GLOBAL_SLOT_DIR": os.getenv(
+            "MCP_RESEARCH_GLOBAL_SLOT_DIR",
+            str(default_global_slot_root() / "reports"),
+        ),
         "MCP_RESEARCH_JOB_TIMEOUT": os.getenv("MCP_RESEARCH_JOB_TIMEOUT", "2700"),
         "MCP_RESEARCH_JOB_RETENTION_HOURS": os.getenv(
             "MCP_RESEARCH_JOB_RETENTION_HOURS", "72"
@@ -2454,6 +2462,15 @@ def _get_job_manager() -> JobManager:
             max_queued_jobs=_env_int("MCP_RESEARCH_MAX_QUEUED_JOBS", 9),
             timeout_seconds=_job_timeout_seconds(),
             retention_hours=_env_float("MCP_RESEARCH_JOB_RETENTION_HOURS", 72),
+            global_slot_dir=Path(
+                os.getenv(
+                    "MCP_RESEARCH_GLOBAL_SLOT_DIR",
+                    str(default_global_slot_root() / "reports"),
+                )
+            ),
+            global_concurrency=_env_int(
+                "MCP_RESEARCH_GLOBAL_CONCURRENCY", 3, minimum=1
+            ),
             worker_env={
                 "GPT_RESEARCHER_PROFILE_DIR": str(WORKDIR),
                 "PYTHONPATH": pythonpath,

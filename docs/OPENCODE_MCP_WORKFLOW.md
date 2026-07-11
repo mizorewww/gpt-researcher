@@ -1,5 +1,7 @@
 # OpenCode 调度 GPT Researcher：可重复运行手册
 
+> 本文是市场日报 acceptance harness 的运维手册，不是通用工作流接口。要通过每个目录自己的 `AGENTS.md`、agents、skills 和 MCP 创建任意调查流程，请使用 [`GENERIC_RESEARCH_WORKFLOWS.md`](GENERIC_RESEARCH_WORKFLOWS.md) 与 `scripts/research_workflow.sh`。
+
 这套入口用于重复执行已经验收过的 OpenCode → MCP → 隔离报告 worker → 三路 Codex/Tavily 调查链路。日常生成一份报告用 `single`；验证整机满载并发用 `stress`。两者都会创建全新的运行目录，不会读取旧报告补写。
 
 ## 1. 一次性准备

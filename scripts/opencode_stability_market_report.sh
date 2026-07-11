@@ -35,7 +35,9 @@ Examples:
   scripts/opencode_stability_market_report.sh revalidate \
     outputs/stability/<run-id>/manifest.json
 
-See docs/OPENCODE_MCP_WORKFLOW.md for prerequisites, artifacts, and troubleshooting.
+This is the market-specific acceptance harness. For generic AGENTS/skills/MCP
+workflows, use scripts/research_workflow.sh and docs/GENERIC_RESEARCH_WORKFLOWS.md.
+See docs/OPENCODE_MCP_WORKFLOW.md for market acceptance details.
 EOF
 }
 

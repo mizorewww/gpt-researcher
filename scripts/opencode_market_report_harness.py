@@ -33,6 +33,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 from zoneinfo import ZoneInfo
 
 from dotenv import dotenv_values
+from gpt_researcher.job_manager import default_global_slot_root
 
 try:
     import psutil
@@ -176,6 +177,7 @@ class ProcessRun:
 
 def make_layout(project_root: Path, run_id: str, base_dir: Path | None = None) -> Layout:
     base = base_dir or project_root
+    slot_root = default_global_slot_root()
     runtime_dir = base / ".tmp" / "opencode-market" / run_id
     artifact_dir = base / "outputs" / "stability" / run_id
     log_dir = base / "run_logs" / "opencode-market" / run_id
@@ -197,7 +199,7 @@ def make_layout(project_root: Path, run_id: str, base_dir: Path | None = None) -
         xdg_state=runtime_dir / "xdg" / "state",
         jobs_dir=runtime_dir / "research-jobs",
         reports_dir=artifact_dir / "reports",
-        codex_slot_dir=runtime_dir / "codex-global-slots",
+        codex_slot_dir=slot_root / "codex",
         manifest_path=artifact_dir / "manifest.json",
         event_log_path=log_dir / "harness.jsonl",
         config_path=xdg_config / "opencode" / "opencode.jsonc",
@@ -227,6 +229,10 @@ def research_environment(layout: Layout) -> dict[str, str]:
         "MCP_RESEARCH_JOBS_DIR": str(layout.jobs_dir),
         "MCP_RESEARCH_MAX_CONCURRENT_JOBS": "3",
         "MCP_RESEARCH_MAX_QUEUED_JOBS": "9",
+        "MCP_RESEARCH_GLOBAL_SLOT_DIR": str(
+            default_global_slot_root() / "reports"
+        ),
+        "MCP_RESEARCH_GLOBAL_CONCURRENCY": "3",
         "MCP_RESEARCH_JOB_TIMEOUT": "2700",
         "MCP_RESEARCH_JOB_RETENTION_HOURS": "72",
         "RETRIEVER": "tavily,codex",

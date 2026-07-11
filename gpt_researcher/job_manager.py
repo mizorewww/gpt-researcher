@@ -23,6 +23,7 @@ from typing import Any
 from uuid import uuid4
 
 import psutil
+from filelock import FileLock, Timeout as FileLockTimeout
 
 
 TERMINAL_STATUSES = {
@@ -33,6 +34,18 @@ TERMINAL_STATUSES = {
     "interrupted",
 }
 ACTIVE_STATUSES = {"queued", "running"}
+
+
+def default_global_slot_root() -> Path:
+    """Return one user-wide slot root shared by every checkout and runner."""
+
+    configured = os.getenv("GPT_RESEARCHER_GLOBAL_SLOT_ROOT")
+    root = (
+        Path(configured)
+        if configured
+        else Path.home() / ".gpt-researcher" / "slots"
+    )
+    return root.expanduser().resolve()
 
 
 class JobQueueFullError(RuntimeError):
@@ -83,6 +96,8 @@ class JobManager:
         worker_command: Sequence[str] | None = None,
         worker_env: Mapping[str, str] | None = None,
         terminate_grace_seconds: float = 5,
+        global_slot_dir: Path | None = None,
+        global_concurrency: int = 3,
     ) -> None:
         if max_concurrent_jobs < 1:
             raise ValueError("max_concurrent_jobs must be at least 1")
@@ -90,6 +105,8 @@ class JobManager:
             raise ValueError("max_queued_jobs cannot be negative")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if global_concurrency < 1:
+            raise ValueError("global_concurrency must be at least 1")
 
         self.jobs_dir = Path(jobs_dir).expanduser().resolve()
         self.jobs_dir.mkdir(parents=True, exist_ok=True)
@@ -103,6 +120,15 @@ class JobManager:
         )
         self.worker_env = dict(worker_env or {})
         self.terminate_grace_seconds = terminate_grace_seconds
+        self.global_slot_dir = (
+            Path(global_slot_dir).expanduser().resolve()
+            if global_slot_dir is not None
+            else None
+        )
+        self.global_concurrency = global_concurrency
+        if self.global_slot_dir is not None:
+            self.global_slot_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+            self.global_slot_dir.chmod(0o700)
 
         self._lock = asyncio.Lock()
         self._semaphore = asyncio.Semaphore(max_concurrent_jobs)
@@ -111,6 +137,19 @@ class JobManager:
         self._cancel_requested: set[str] = set()
         self._recovered_queued: set[str] = set()
         self._recover_and_cleanup()
+
+    async def _acquire_global_slot(self) -> tuple[FileLock | None, int | None]:
+        if self.global_slot_dir is None:
+            return None, None
+        while True:
+            for slot in range(self.global_concurrency):
+                lock = FileLock(str(self.global_slot_dir / f"slot-{slot}.lock"))
+                try:
+                    lock.acquire(timeout=0)
+                except FileLockTimeout:
+                    continue
+                return lock, slot
+            await asyncio.sleep(0.05)
 
     def _job_dir(self, job_id: str) -> Path:
         # UUID validation also prevents path traversal through public MCP input.
@@ -593,8 +632,11 @@ class JobManager:
 
     async def _execute_within_budget(self, job_id: str) -> None:
         process: asyncio.subprocess.Process | None = None
+        global_lock: FileLock | None = None
+        global_slot: int | None = None
         try:
             async with self._semaphore:
+                global_lock, global_slot = await self._acquire_global_slot()
                 async with self._lock:
                     status = self._status_unchecked(job_id)
                     if not status or status.get("status") != "queued":
@@ -608,6 +650,11 @@ class JobManager:
                         started_at_epoch=now,
                     )
                     self._append_event(job_id, "started")
+                    if global_slot is not None:
+                        self._append_event(
+                            job_id, "global_slot_acquired", slot=global_slot
+                        )
+                        self._write_manifest(job_id, global_job_slot=global_slot)
 
                 paths = self._paths(self._job_dir(job_id))
                 paths["stderr_pending"].unlink(missing_ok=True)
@@ -822,6 +869,7 @@ class JobManager:
                             ).get("started_at"),
                             "finished_at": finished_at,
                         },
+                        global_job_slot=global_slot,
                         residual_processes_terminated=residual_pids,
                     )
         except asyncio.CancelledError:
@@ -889,6 +937,14 @@ class JobManager:
                         error=safe_error,
                     )
         finally:
+            if global_lock is not None:
+                global_lock.release()
+                try:
+                    self._append_event(
+                        job_id, "global_slot_released", slot=global_slot
+                    )
+                except (OSError, ValueError):
+                    pass
             self._cancel_requested.discard(job_id)
 
     @staticmethod

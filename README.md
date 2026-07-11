@@ -203,7 +203,7 @@ CODEX_SEARCH_SERVICE_TIER=fast
 
 When `CODEX_SEARCH_SERVICE_TIER=fast`, the helper passes both `service_tier="fast"` and `features.fast_mode=true` to Codex CLI. `plan-exec` is still available for one-off deep searches, but it doubles Codex CLI invocations per generated sub-query and is not the default stability profile.
 
-The tested profile is `search + medium + fast`, with up to `12` source-addressable results retained from each Codex call. The MCP coordinator admits at most three isolated report workers and queues at most nine more jobs. Each report can make up to six Codex calls over its lifetime (three initial plus at most three follow-ups), but its per-report semaphore allows only three simultaneous Codex processes. The cross-process slot pool therefore enforces a machine-wide ceiling of nine simultaneous Codex processes across the three workers. A worker uses at most four ordinary retrievers and five scrapers. Set `CODEX_SEARCH_GLOBAL_SLOT_DIR` to a shared writable directory when several coordinator processes run on the same machine.
+The tested profile is `search + medium + fast`, with up to `12` source-addressable results retained from each Codex call. The MCP coordinator admits at most three isolated report workers and queues at most nine more jobs. Each report can make up to six Codex calls over its lifetime (three initial plus at most three follow-ups), but its per-report semaphore allows only three simultaneous Codex processes. The cross-process slot pool therefore enforces a machine-wide ceiling of nine simultaneous Codex processes across the three workers. A worker uses at most four ordinary retrievers and five scrapers. Every checkout and installed runner shares `~/.gpt-researcher/slots` by default; set `GPT_RESEARCHER_GLOBAL_SLOT_ROOT` only when all coordinator processes use the same alternative writable directory.
 
 For strict market-daily reports, the single gap round is reserved for Japan, Korea, and Hong Kong whenever any regional stock gap remains. Keyless, allowlisted market-history supplements run inside the same four-slot ordinary-retriever pool: Yahoo Chart supplies exact target/previous-session closes for the required index, commodity-futures, and stock pools, while server-rendered historical pages provide independent index checks, including sparse surfaces such as TOPIX and Hang Seng TECH. Every observation is converted to `EvidenceItem` records with an exact date, unit, deep source URL, and checksum; an unavailable or ambiguous page fails softly per source. The writer receives deterministic index, commodity, and stock row ledgers: index and commodity rows require a canonical value plus two retrieved URLs, the commodity ledger also freezes unit and continuous-contract basis, and the stock ledger selects two configured liquid leaders and the two largest absolute target-day movers per market. Before judging, an evidence-URL allow-list restores only conservatively equivalent URLs and removes invented link targets; any duplicate full-report stream restart is repaired and recorded. The report still fails closed if any required row remains incomplete.
 
@@ -232,6 +232,17 @@ Each job writes a UUID-scoped, atomic audit directory. Coverage and unique HTTP 
 ### OpenCode single-report and 3x3 stress harness
 
 For the repeatable Chinese quick-start, exact OpenCode/MCP tool sequence, artifact layout, immutable revalidation, and failure triage, see [docs/OPENCODE_MCP_WORKFLOW.md](docs/OPENCODE_MCP_WORKFLOW.md).
+
+For general research, do not modify the market harness. Create an OpenCode-native workflow whose own `AGENTS.md`, agents, skills, command, schemas, and MCP configuration define the investigation:
+
+```bash
+scripts/research_workflow.sh init company-intelligence
+scripts/research_workflow.sh validate research_workflows/company-intelligence
+scripts/research_workflow.sh run research_workflows/company-intelligence \
+  --input 'Investigate the company, its market, competitors, evidence, and risks.'
+```
+
+See the [generic workflow guide](docs/GENERIC_RESEARCH_WORKFLOWS.md). The market harness below remains a domain-specific acceptance and load test.
 
 The acceptance harness never reuses a run directory and never reads a report outside the current run. Its isolated OpenCode config denies every tool except `gpt-researcher-codex-long_*`. It emits OpenCode JSONL logs plus an atomic `manifest.json`, enforces a hard deadline, terminates the process tree, and fails if tracked child processes remain.
 

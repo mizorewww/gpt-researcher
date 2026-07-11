@@ -26,6 +26,7 @@ import psutil
 from filelock import FileLock, Timeout as FileLockTimeout
 
 from ...evidence import EvidenceItem, canonical_http_url, deduplicate_evidence
+from ...job_manager import default_global_slot_root
 
 
 _TRANSIENT_ERROR_MARKERS = (
@@ -148,9 +149,9 @@ class CodexSearch:
         self.slot_directory = Path(
             os.getenv(
                 "CODEX_SEARCH_GLOBAL_SLOT_DIR",
-                str(Path(os.getenv("TMPDIR", "/tmp")) / "gpt-researcher-codex-slots"),
+                str(default_global_slot_root() / "codex"),
             )
-        )
+        ).expanduser().resolve()
         self.active_pid: int | None = None
         self.last_pid: int | None = None
         self.run_history: list[dict[str, Any]] = []

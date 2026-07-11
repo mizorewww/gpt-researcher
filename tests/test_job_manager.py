@@ -158,6 +158,69 @@ class TestJobManager(unittest.IsolatedAsyncioTestCase):
             timeout=6,
         )
 
+    async def test_global_slots_cap_workers_across_two_coordinators(self):
+        slot_dir = self.root / "global-slots"
+        first_manager = JobManager(
+            self.root / "jobs-a",
+            max_concurrent_jobs=3,
+            max_queued_jobs=3,
+            timeout_seconds=5,
+            worker_command=(sys.executable, str(self.worker)),
+            global_slot_dir=slot_dir,
+            global_concurrency=3,
+        )
+        second_manager = JobManager(
+            self.root / "jobs-b",
+            max_concurrent_jobs=3,
+            max_queued_jobs=3,
+            timeout_seconds=5,
+            worker_command=(sys.executable, str(self.worker)),
+            global_slot_dir=slot_dir,
+            global_concurrency=3,
+        )
+        self.managers.extend((first_manager, second_manager))
+        submitted = [
+            (
+                first_manager,
+                await first_manager.submit(
+                    {"query": f"a-{index}", "fake_delay": 0.4}
+                ),
+            )
+            for index in range(2)
+        ] + [
+            (
+                second_manager,
+                await second_manager.submit(
+                    {"query": f"b-{index}", "fake_delay": 0.4}
+                ),
+            )
+            for index in range(2)
+        ]
+
+        peak = 0
+        observed_global_queue = False
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            statuses = [
+                manager.compact_status(job["job_id"])["status"]
+                for manager, job in submitted
+            ]
+            running = statuses.count("running")
+            peak = max(peak, running)
+            observed_global_queue |= running == 3 and statuses.count("queued") == 1
+            if statuses.count("completed") == 4:
+                break
+            await asyncio.sleep(0.02)
+
+        self.assertEqual(peak, 3)
+        self.assertTrue(observed_global_queue)
+        self.assertTrue(
+            all(
+                manager.compact_status(job["job_id"])["status"] == "completed"
+                for manager, job in submitted
+            )
+        )
+
     async def test_compact_status_bulk_wait_and_report_redaction(self):
         manager = self.manager(
             max_concurrent_jobs=1,

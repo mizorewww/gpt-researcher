@@ -1,0 +1,12 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["status", "summary", "artifacts", "source_count"],
+  "properties": {
+    "status": {"enum": ["completed", "failed"]},
+    "summary": {"type": "string", "minLength": 1},
+    "artifacts": {"type": "array", "items": {"type": "string"}},
+    "source_count": {"type": "integer", "minimum": 0}
+  }
+}
