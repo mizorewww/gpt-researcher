@@ -1,17 +1,17 @@
 import logging
 import os
 import uuid
-import json
-from fastapi import WebSocket
-from typing import List, Dict, Any
+from typing import List, Dict
 
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_community.vectorstores import InMemoryVectorStore
 from gpt_researcher.memory import Memory
 from gpt_researcher.config.config import Config
-from gpt_researcher.utils.llm import create_chat_completion
 from gpt_researcher.utils.tools import create_chat_completion_with_tools, create_search_tool
-from tavily import TavilyClient
+try:
+    from tavily import TavilyClient
+except ImportError:  # optional chat-search dependency
+    TavilyClient = None
 from datetime import datetime
 
 # Setup logging
@@ -69,11 +69,13 @@ class ChatAgentWithMemory:
         
         # Initialize Tavily client (optional - only if API key is available)
         tavily_api_key = os.environ.get("TAVILY_API_KEY")
-        if tavily_api_key:
+        if tavily_api_key and TavilyClient is not None:
             self.tavily_client = TavilyClient(api_key=tavily_api_key)
         else:
             self.tavily_client = None
-            logger.warning("TAVILY_API_KEY not set - web search in chat will be disabled")
+            logger.warning(
+                "Tavily chat search is disabled (missing API key or tavily package)"
+            )
         
         # Process document and create vector store if not provided
         if not self.vector_store and False:

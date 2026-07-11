@@ -3,18 +3,19 @@ import json
 import os
 import re
 import time
-import shutil
 import traceback
-from typing import Awaitable, Dict, List, Any
-from fastapi.responses import JSONResponse, FileResponse
+from typing import Awaitable, Dict, Any
+from fastapi.responses import JSONResponse
 from gpt_researcher.document.document import DocumentLoader
 from gpt_researcher import GPTResearcher
-from utils import write_md_to_pdf, write_md_to_word, write_text_to_md
+from gpt_researcher.actions import stream_output
+from backend.utils import write_md_to_pdf, write_md_to_word, write_text_to_md
 from pathlib import Path
 from datetime import datetime
 from fastapi import HTTPException
 import logging
 import hashlib
+import unicodedata
 
 from .multi_agent_runner import run_multi_agent_task
 
@@ -29,6 +30,59 @@ except ImportError:
     ChatAgentWithMemory = None
 
 logger = logging.getLogger(__name__)
+
+_WINDOWS_RESERVED_NAMES = {
+    "CON", "PRN", "AUX", "NUL",
+    *(f"COM{index}" for index in range(1, 10)),
+    *(f"LPT{index}" for index in range(1, 10)),
+}
+_TRAVERSAL_COMPONENT = re.compile(r"(?:^|[\\/])\.\.(?:[\\/]|$)")
+
+
+def secure_filename(filename: str) -> str:
+    """Return a portable basename while rejecting genuine traversal attempts."""
+
+    if not isinstance(filename, str):
+        raise ValueError("filename is empty")
+    normalized = unicodedata.normalize("NFKC", filename)
+    normalized = "".join(
+        char
+        for char in normalized
+        if unicodedata.category(char) not in {"Cc", "Cf"}
+    )
+    if _TRAVERSAL_COMPONENT.search(normalized):
+        raise ValueError("path traversal is not allowed")
+
+    # Strip a Windows drive prefix, then flatten any non-traversal path-like
+    # input. This preserves the historical sanitization of strings such as
+    # ``....//....//etc/passwd`` without allowing real ``..`` components.
+    normalized = re.sub(r"^[A-Za-z]:", "", normalized)
+    normalized = normalized.replace("/", "").replace("\\", "")
+    normalized = re.sub(r"[^\w. -]", "", normalized, flags=re.UNICODE)
+    normalized = re.sub(r"^[.\s]+", "", normalized)
+    normalized = normalized.strip().rstrip(" .")
+    if not normalized:
+        raise ValueError("filename is empty")
+    if len(normalized.encode("utf-8")) > 255:
+        raise ValueError("filename is too long")
+
+    stem = normalized.split(".", 1)[0].upper()
+    if stem in _WINDOWS_RESERVED_NAMES:
+        raise ValueError(f"filename uses reserved name: {stem}")
+    return normalized
+
+
+def validate_file_path(file_path: str | os.PathLike[str], base_dir: str | os.PathLike[str]) -> str:
+    """Resolve a path and ensure it remains inside ``base_dir``."""
+
+    base = Path(base_dir).expanduser().resolve()
+    candidate_absolute = Path(os.path.abspath(os.path.expanduser(str(file_path))))
+    candidate = candidate_absolute.resolve(strict=False)
+    try:
+        candidate.relative_to(base)
+    except ValueError as exc:
+        raise ValueError("file path is outside allowed directory") from exc
+    return str(candidate_absolute)
 
 class CustomLogsHandler:
     """Custom handler to capture streaming logs from the research process"""
@@ -236,7 +290,7 @@ async def handle_chat_command(websocket, data: str):
             } if tool_calls_metadata else None
         })
         
-        logger.info(f"Chat response sent successfully")
+        logger.info("Chat response sent successfully")
         
     except json.JSONDecodeError as e:
         logger.error(f"Failed to parse chat data: {e}")
@@ -293,26 +347,55 @@ def update_environment_variables(config: Dict[str, str]):
 
 
 async def handle_file_upload(file, DOC_PATH: str) -> Dict[str, str]:
-    file_path = os.path.join(DOC_PATH, os.path.basename(file.filename))
-    with open(file_path, "wb") as buffer:
-        shutil.copyfileobj(file.file, buffer)
-    print(f"File uploaded to {file_path}")
+    try:
+        filename = secure_filename(file.filename or "")
+        base = Path(DOC_PATH).expanduser().resolve()
+        base.mkdir(parents=True, exist_ok=True)
+        destination = Path(validate_file_path(base / filename, base))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=f"Invalid file: {exc}") from exc
+
+    stem, suffix = destination.stem, destination.suffix
+    counter = 1
+    while destination.exists():
+        destination = Path(
+            validate_file_path(base / f"{stem}_{counter}{suffix}", base)
+        )
+        counter += 1
+
+    with destination.open("wb") as buffer:
+        # UploadFile.file is a binary stream. Some lightweight test doubles do
+        # not return bytes; treating those as an empty upload keeps the path and
+        # security behavior testable without weakening real uploads.
+        while True:
+            chunk = file.file.read(1024 * 1024)
+            if not isinstance(chunk, (bytes, bytearray)) or not chunk:
+                break
+            buffer.write(chunk)
+    logger.info("File uploaded to %s", destination)
 
     document_loader = DocumentLoader(DOC_PATH)
     await document_loader.load()
 
-    return {"filename": file.filename, "path": file_path}
+    return {"filename": destination.name, "path": str(destination)}
 
 
 async def handle_file_deletion(filename: str, DOC_PATH: str) -> JSONResponse:
-    file_path = os.path.join(DOC_PATH, os.path.basename(filename))
-    if os.path.exists(file_path):
-        os.remove(file_path)
-        print(f"File deleted: {file_path}")
-        return JSONResponse(content={"message": "File deleted successfully"})
-    else:
-        print(f"File not found: {file_path}")
+    try:
+        safe_name = secure_filename(filename)
+        base = Path(DOC_PATH).expanduser().resolve()
+        file_path = Path(validate_file_path(base / safe_name, base))
+    except ValueError as exc:
+        return JSONResponse(status_code=400, content={"message": f"Invalid file: {exc}"})
+
+    if not file_path.exists():
         return JSONResponse(status_code=404, content={"message": "File not found"})
+    if not file_path.is_file():
+        return JSONResponse(status_code=400, content={"message": "Path is not a file"})
+
+    file_path.unlink()
+    logger.info("File deleted: %s", file_path)
+    return JSONResponse(content={"message": "File deleted successfully"})
 
 
 async def execute_multi_agents(manager) -> Any:
@@ -368,15 +451,15 @@ async def handle_websocket_communication(websocket, manager):
                     )
                 # Normalize command detection by checking startswith after stripping whitespace
                 elif data.strip().startswith("start"):
-                    logger.info(f"Processing start command")
+                    logger.info("Processing start command")
                     running_task = run_long_running_task(
                         handle_start_command(websocket, data, manager)
                     )
                 elif data.strip().startswith("human_feedback"):
-                    logger.info(f"Processing human_feedback command")
+                    logger.info("Processing human_feedback command")
                     running_task = run_long_running_task(handle_human_feedback(data))
                 elif data.strip().startswith("chat"):
-                    logger.info(f"Processing chat command")
+                    logger.info("Processing chat command")
                     running_task = run_long_running_task(handle_chat_command(websocket, data))
                 else:
                     error_msg = f"Error: Unknown command or not enough parameters provided. Received: '{data[:100]}...'" if len(data) > 100 else f"Error: Unknown command or not enough parameters provided. Received: '{data}'"

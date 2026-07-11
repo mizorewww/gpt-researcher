@@ -284,10 +284,14 @@ class DeepResearch:
         answers = ["Automatically proceeding with research"] * len(follow_up_questions)
 
         # Combine query and Q&A
+        question_answers = "\n".join(
+            f"Q: {question}\nA: {answer}"
+            for question, answer in zip(follow_up_questions, answers)
+        )
         combined_query = f"""
         Initial Query: {self.query}
         Follow-up Questions and Answers:
-        {' '.join([f'Q: {q}\nA: {a}' for q, a in zip(follow_up_questions, answers)])}
+        {question_answers}
         """
 
         # Run deep research
