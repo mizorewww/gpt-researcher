@@ -4,6 +4,8 @@ from pathlib import Path
 import sys
 import logging
 
+pytestmark = pytest.mark.live
+
 # Add the project root to Python path
 project_root = Path(__file__).parent.parent
 sys.path.append(str(project_root))
@@ -68,4 +70,4 @@ async def test_researcher_logging():  # Renamed function to be more specific
         raise
 
 if __name__ == "__main__":
-    pytest.main([__file__]) 
+    pytest.main([__file__])

@@ -8,6 +8,7 @@ from datetime import datetime
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+pytestmark = pytest.mark.live
 
 class TestWebSocket(WebSocket):
     def __init__(self):

@@ -5,6 +5,9 @@ description = "GPT Researcher is an autonomous agent designed for comprehensive 
 authors = ["Assaf Elovic <assaf.elovic@gmail.com>"]
 license = "MIT"
 readme = "README.md"
+include = [
+    { path = "codex_search", format = ["sdist", "wheel"] },
+]
 
 [tool.poetry.dependencies]
 python = ">=3.11"
@@ -56,13 +59,21 @@ build-backend = "poetry.core.masonry.api"
 
 [tool.pytest.ini_options]
 asyncio_mode = "strict"
-addopts = "-v"
+addopts = '-v -m "not live"'
 testpaths = ["tests"]
 python_files = "test_*.py"
-asyncio_fixture_loop_scope = "function"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
+markers = [
+    "live: requires external credentials, network services, and may incur cost",
+]
 
 [tool.uv.sources]
 gpt-researcher = { workspace = true }
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=8.3"
+pytest-asyncio = ">=0.24"
 
 [project]
 name = "gpt-researcher"
@@ -246,6 +257,8 @@ gpt-researcher = "gpt_researcher.mcp_profile_server:main"
 
 [dependency-groups]
 dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
     "types-aiofiles>=24.1.0.20250516",
     "types-beautifulsoup4>=4.12.0.20250516",
     "types-colorama>=0.4.15.20240311",

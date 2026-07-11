@@ -57,25 +57,54 @@ class ResearchConductorRetrievalTests(unittest.IsolatedAsyncioTestCase):
         researcher = self.make_researcher(FakeSnippetRetriever)
         conductor = ResearchConductor(researcher)
 
-        urls, prefetched = await conductor._search_relevant_source_urls("rust async runtimes")
+        urls, prefetched, snippet_fallback = await conductor._search_relevant_source_urls(
+            "rust async runtimes"
+        )
 
         self.assertCountEqual(
             urls,
             ["https://example.com/one", "https://example.com/two"],
         )
         self.assertEqual(prefetched, [])
+        self.assertEqual(
+            snippet_fallback,
+            [
+                {
+                    "url": "https://example.com/one",
+                    "source": "https://example.com/one",
+                    "raw_content": "A" * 180,
+                    "title": "",
+                },
+                {
+                    "url": "https://example.com/two",
+                    "source": "https://example.com/two",
+                    "raw_content": "B" * 220,
+                    "title": "",
+                },
+            ],
+        )
 
     async def test_raw_content_results_stay_prefetched(self):
         researcher = self.make_researcher(FakeFullContentRetriever)
         conductor = ResearchConductor(researcher)
 
-        urls, prefetched = await conductor._search_relevant_source_urls("pubmed article")
+        urls, prefetched, snippet_fallback = await conductor._search_relevant_source_urls(
+            "pubmed article"
+        )
 
         self.assertEqual(urls, [])
         self.assertEqual(
             prefetched,
-            [{"url": "https://example.com/full", "raw_content": "C" * 500}],
+            [
+                {
+                    "url": "https://example.com/full",
+                    "source": "https://example.com/full",
+                    "raw_content": "C" * 500,
+                    "title": "",
+                }
+            ],
         )
+        self.assertEqual(snippet_fallback, [])
 
 
 if __name__ == "__main__":

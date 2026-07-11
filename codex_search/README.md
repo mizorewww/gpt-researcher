@@ -81,32 +81,43 @@ Optional configuration knobs:
 - `CODEX_SEARCH_MODE`: `search` or `plan-exec`.
 - `CODEX_SEARCH_TIMEOUT`: per-invocation timeout in seconds; defaults to `900` unless `.env` overrides it.
 - `CODEX_SEARCH_RETRIEVER_TIMEOUT`: timeout used when the GPT Researcher `CodexSearch` retriever calls this helper.
-- `CODEX_SEARCH_RETRIEVER_CONCURRENCY`: maximum concurrent Codex retriever processes. Defaults to `1` in the long-search profile.
+- `CODEX_SEARCH_MAX_RESULTS`: maximum source-addressable Codex results retained per call; the market profile uses `12` so multi-entity evidence is not silently truncated to the generic five-result limit.
+- `CODEX_SEARCH_RETRIEVER_CONCURRENCY`: per-report Codex ceiling; the concurrent report profile sets it to `3`.
+- `CODEX_SEARCH_GLOBAL_CONCURRENCY`: machine-wide Codex ceiling shared through cross-process slots; the tested profile sets it to `9`.
+- `CODEX_SEARCH_GLOBAL_SLOT_DIR`: shared writable directory containing the global slot locks.
 
 ## GPT Researcher Integration
 
-The repository registers a `codex` retriever alongside the built-in retrievers. With:
+The repository registers a `codex` retriever alongside the built-in retrievers. The tested long-report configuration is `search + medium + fast` with `CODEX_SEARCH_MAX_RESULTS=12`. With:
 
 ```sh
 RETRIEVER=tavily,codex
 CODEX_SEARCH_MODE=search
 CODEX_SEARCH_TIMEOUT=300
 CODEX_SEARCH_RETRIEVER_TIMEOUT=300
-CODEX_SEARCH_RETRIEVER_CONCURRENCY=1
+CODEX_SEARCH_MAX_RESULTS=12
+CODEX_SEARCH_RETRIEVER_RETRIES=1
+CODEX_SEARCH_RETRIEVER_RETRY_DELAY=2
+CODEX_SEARCH_RETRIEVER_CONCURRENCY=3
+CODEX_SEARCH_GLOBAL_CONCURRENCY=9
 CODEX_SEARCH_MODEL=gpt-5.5
 CODEX_SEARCH_REASONING_EFFORT=medium
 CODEX_SEARCH_SERVICE_TIER=fast
 ```
 
-GPT Researcher treats Tavily and Codex as peer search tools:
+GPT Researcher plans exactly three initial structured research work items and executes them concurrently. Each initial work item makes one Codex call, so every report starts with exactly three concurrent Codex calls. Within each work item, Tavily and Codex are peer search tools:
 
-1. The same planning query is sent to every configured non-MCP retriever.
-2. Results are merged and deduplicated by URL.
-3. Tavily URLs continue through the normal scraping pipeline.
-4. Codex results include `raw_content`, so they enter the normal context compression pipeline directly.
-5. The final report writer receives one combined context pool.
+1. Planning uses a lightweight retriever and does not call Codex serially in advance.
+2. Each work-item query is sent to every configured non-MCP retriever.
+3. Results are normalized into evidence, merged, and deduplicated by real HTTP(S) URL and checksum.
+4. Tavily URLs continue through the normal scraping pipeline.
+5. Codex returns structured claims and sources instead of one synthetic local document.
+6. A coverage/conflict check may launch one follow-up round of at most three concurrent Codex-backed gap queries.
+7. The final report writer receives one combined evidence pool.
 
-This is intentionally different from using Codex as a separate report writer. Codex is a search retriever here; GPT Researcher still owns planning, compression, and final report writing.
+This yields exactly three initial Codex calls and at most six Codex calls over the lifetime of one report. The per-report semaphore remains `3`, so the initial calls or follow-up calls can overlap three at a time, but a report never runs more than three Codex processes simultaneously. `CODEX_SEARCH_MAX_RESULTS=12` retains up to twelve source-addressable results from each call. This is intentionally different from using Codex as a separate report writer: Codex is a search retriever here, while GPT Researcher still owns planning, compression, and final report writing.
+
+Market-daily acceptance adds narrowly scoped, keyless history checks without changing the Codex call budget. The initial U.S. index, commodity, and stock lanes and the three Asian regional gaps use Yahoo Chart plus allowlisted server-rendered history pages in the shared four-slot ordinary-retriever pool. They emit the same source-addressable `EvidenceItem` format and fail softly per URL. Exact index values are exposed through a deterministic two-source ledger; WTI, Brent, gold, and copper use a second ledger that freezes the target-date Yahoo continuous-futures value, unit, basis, and a distinct corroborating URL; and a stock ledger fixes four evidence-backed rows per market (two leaders plus two largest absolute movers). Incomplete ledgers are never filled with guesses. Draft URLs are restricted to retrieved evidence before the quality gate, and any detected duplicate full-report stream restart is repaired with an audit entry.
 
 Run a report with the current `.env` profile:
 
@@ -116,16 +127,18 @@ Run a report with the current `.env` profile:
 
 Performance note: `search` mode is the default stability profile. `plan-exec` first asks Codex to plan and then runs a search-enabled pass, so every generated GPT Researcher sub-query can become two Codex CLI invocations. Use it only for targeted one-off searches where the extra latency is acceptable.
 
+To repeat the verified OpenCode single-report or 3×3 load workflow, use `scripts/opencode_stability_market_report.sh --help` and follow the Chinese operator guide at [`docs/OPENCODE_MCP_WORKFLOW.md`](../docs/OPENCODE_MCP_WORKFLOW.md).
+
 ## MCP Profile
 
-This checkout includes a packaged MCP stdio server that loads `.env` and exposes `profile_info` plus `research_report`. The checked-in `.mcp.json` starts the local checkout through `uvx --from .`:
+This checkout includes a packaged MCP stdio coordinator that loads `.env` and exposes synchronous and asynchronous report tools. The checked-in `.mcp.json` starts the local checkout directly:
 
 ```json
 {
   "mcpServers": {
     "gpt-researcher-codex-long": {
-      "command": "uvx",
-      "args": ["--from", ".", "gpt-researcher"]
+      "command": "uv",
+      "args": ["run", "--directory", ".", "gpt-researcher"]
     }
   }
 }
@@ -134,14 +147,14 @@ This checkout includes a packaged MCP stdio server that loads `.env` and exposes
 Validate the same entry point by listing tools with any MCP client, or start it directly:
 
 ```sh
-uvx --from . gpt-researcher
+uv run --directory . gpt-researcher
 ```
 
-A bare `uvx gpt-researcher` installs the published PyPI package, not this checkout. Use `--from .` for local development unless the package has been released with this console entry point. When the packaged MCP entry point changes, bump the package version so uv rebuilds the local package instead of reusing the previous tool environment.
+`uv run --directory` executes the checkout directly and avoids `uvx --refresh` cold starts and stale package environments.
 
-The server loads credentials and model settings from the checkout passed to `uvx --from`, using uv's installed `direct_url.json` metadata. `$GPT_RESEARCHER_PROFILE_DIR` can override that path if needed, but the normal command `uvx --from /Users/aac6fef/Developer/gpt-researcher gpt-researcher` works even when launched outside the repository.
+The server loads credentials and model settings from `$GPT_RESEARCHER_PROFILE_DIR`, normally the same checkout passed to `--directory`.
 
-`research_report` is guarded for instability: it uses the configured smart LLM as a quality gate and retries the configured mixed profile twice by default. Fallback is disabled unless `MCP_RESEARCH_FALLBACK_RETRIEVER` is explicitly set, because a weak single-source fallback can otherwise accept guessed market data. The result includes `fallback_used` and an `attempts` list so callers can see whether the mixed profile was retried or bypassed.
+Long reports should use `research_report_start`, `research_reports_status`, and `research_report_result`; `research_report_cancel` terminates the isolated worker process tree. `research_report_status` remains available for one job, and synchronous `research_report` is retained for short requests. The coordinator runs at most three report workers and queues at most nine jobs. Each worker makes exactly three initial Codex calls and may make at most three more in one follow-up round, but runs no more than three simultaneously; the global slot pool caps the machine at nine simultaneous Codex processes.
 
 Call the MCP tool with:
 
@@ -154,7 +167,7 @@ Call the MCP tool with:
 }
 ```
 
-The result includes the markdown report, the saved output path, source count, total cost, and the active profile values.
+For repeatable relative-date requests, also pass `target_date` and `timezone` to `research_report_start`. Status responses stay compact; fetch report content only when needed with `research_report_result(job_id, include_report=true)`.
 
 ## Mode Comparison
 
@@ -206,4 +219,4 @@ The wrapper does not inspect Codex auth files. On CLI failures, it redacts value
 - It depends on a local Codex CLI compatible with `codex --search exec`.
 - Web search quality and source selection are controlled by Codex and the selected model.
 - `--ephemeral` reduces local session persistence, but Codex provider-side behavior follows the installed CLI and account settings.
-- The helper captures the final agent message, not a structured source database. Use `--show-events` only for debugging because it prints raw JSONL event output to stderr.
+- Direct wrapper use captures the final Codex message. Retriever integration additionally requests and validates structured claims and sources for evidence normalization. Use `--show-events` only for debugging because it prints raw JSONL event output to stderr.

@@ -1,0 +1,41 @@
+name: Python tests
+
+on:
+  pull_request:
+  push:
+    branches: [main, master]
+
+permissions:
+  contents: read
+
+jobs:
+  pytest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install Python
+        run: uv python install 3.11
+
+      - name: Sync development environment
+        run: uv sync --group dev
+
+      - name: Run test_*.py suite
+        env:
+          PYTHONHASHSEED: "0"
+        run: uv run pytest
+
+      - name: Dry-run single and three-report OpenCode harnesses
+        env:
+          DRY_RUN: "1"
+          RUNTIME_BASE_DIR: "${{ runner.temp }}/gpt-researcher-harness"
+        run: |
+          RUN_ID=ci-single scripts/opencode_stability_market_report.sh single
+          RUN_ID=ci-stress scripts/opencode_stability_market_report.sh stress

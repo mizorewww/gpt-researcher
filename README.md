@@ -157,7 +157,7 @@ report = await researcher.write_report()
 
 ### Local Tavily + Codex Long Search Profile
 
-This checkout includes a local Codex search retriever profile for higher-quality web research. It runs Tavily and Codex as peer search tools for the same query, merges their results into the normal scrape/compress/report flow, and uses a 300s Codex timeout for long searches.
+This checkout includes a bounded, concurrent Tavily + Codex research profile. A report is planned into exactly three initial structured work items, and each work item makes one initial Codex call; those three calls run concurrently. After the initial evidence is merged, one bounded gap-check round may issue at most three additional Codex-backed follow-up queries concurrently. A report therefore makes exactly three initial Codex calls and at most six Codex calls in total, while never running more than three at once. Writer or judge retries do not repeat the completed retrieval stage.
 
 One-line local report command:
 
@@ -169,10 +169,33 @@ The profile is controlled through `.env`:
 
 ```bash
 RETRIEVER=tavily,codex
+LANGUAGE=chinese
+TOTAL_WORDS=6000
+SMART_TOKEN_LIMIT=16000
+MCP_RESEARCH_MAX_CONCURRENT_JOBS=3
+MCP_RESEARCH_MAX_QUEUED_JOBS=9
+MCP_RESEARCH_JOB_TIMEOUT=2700
+MCP_RESEARCH_JOB_RETENTION_HOURS=72
+MCP_RESEARCH_MIN_HTTP_SOURCES=25
+MCP_RESEARCH_RETRIEVAL_ATTEMPTS=2
+MCP_RESEARCH_WRITER_ATTEMPTS=2
+MCP_RESEARCH_JUDGE_ATTEMPTS=2
+MCP_RESEARCH_RETRIEVAL_TIMEOUT=750
+MCP_RESEARCH_WRITER_TIMEOUT=450
+MCP_RESEARCH_JUDGE_TIMEOUT=120
+SEARCH_RETRIEVER_CONCURRENCY=4
+MAX_SCRAPER_WORKERS=5
+RESEARCH_MIN_HTTP_SOURCES_PER_WORK_ITEM=8
+RESEARCH_MIN_STOCK_SOURCES_PER_MARKET=4
+RESEARCH_MIN_TOTAL_HTTP_SOURCES=25
 CODEX_SEARCH_MODE=search
 CODEX_SEARCH_TIMEOUT=300
 CODEX_SEARCH_RETRIEVER_TIMEOUT=300
-CODEX_SEARCH_RETRIEVER_CONCURRENCY=1
+CODEX_SEARCH_MAX_RESULTS=12
+CODEX_SEARCH_RETRIEVER_RETRIES=1
+CODEX_SEARCH_RETRIEVER_RETRY_DELAY=2
+CODEX_SEARCH_RETRIEVER_CONCURRENCY=3
+CODEX_SEARCH_GLOBAL_CONCURRENCY=9
 CODEX_SEARCH_MODEL=gpt-5.5
 CODEX_SEARCH_REASONING_EFFORT=medium
 CODEX_SEARCH_SERVICE_TIER=fast
@@ -180,19 +203,61 @@ CODEX_SEARCH_SERVICE_TIER=fast
 
 When `CODEX_SEARCH_SERVICE_TIER=fast`, the helper passes both `service_tier="fast"` and `features.fast_mode=true` to Codex CLI. `plan-exec` is still available for one-off deep searches, but it doubles Codex CLI invocations per generated sub-query and is not the default stability profile.
 
-For MCP clients, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`, which starts the local `gpt-researcher` console entry point with the same profile and exposes `profile_info`, `research_report`, `research_report_start`, and `research_report_status`.
+The tested profile is `search + medium + fast`, with up to `12` source-addressable results retained from each Codex call. The MCP coordinator admits at most three isolated report workers and queues at most nine more jobs. Each report can make up to six Codex calls over its lifetime (three initial plus at most three follow-ups), but its per-report semaphore allows only three simultaneous Codex processes. The cross-process slot pool therefore enforces a machine-wide ceiling of nine simultaneous Codex processes across the three workers. A worker uses at most four ordinary retrievers and five scrapers. Set `CODEX_SEARCH_GLOBAL_SLOT_DIR` to a shared writable directory when several coordinator processes run on the same machine.
 
-Use `research_report_start` plus repeated `research_report_status` polling for long reports in clients with short MCP tool timeouts. The synchronous `research_report` tool is kept for compatibility and short tasks.
+For strict market-daily reports, the single gap round is reserved for Japan, Korea, and Hong Kong whenever any regional stock gap remains. Keyless, allowlisted market-history supplements run inside the same four-slot ordinary-retriever pool: Yahoo Chart supplies exact target/previous-session closes for the required index, commodity-futures, and stock pools, while server-rendered historical pages provide independent index checks, including sparse surfaces such as TOPIX and Hang Seng TECH. Every observation is converted to `EvidenceItem` records with an exact date, unit, deep source URL, and checksum; an unavailable or ambiguous page fails softly per source. The writer receives deterministic index, commodity, and stock row ledgers: index and commodity rows require a canonical value plus two retrieved URLs, the commodity ledger also freezes unit and continuous-contract basis, and the stock ledger selects two configured liquid leaders and the two largest absolute target-day movers per market. Before judging, an evidence-URL allow-list restores only conservatively equivalent URLs and removes invented link targets; any duplicate full-report stream restart is repaired and recorded. The report still fails closed if any required row remains incomplete.
+
+For MCP clients, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`. It starts this checkout with `uv run --directory ...` and exposes:
+
+- `profile_info`
+- `research_report` for compatibility and short requests
+- `research_report_start(query, ..., target_date, timezone)`
+- `research_report_status(job_id, wait_seconds=0)`
+- `research_reports_status(job_ids, wait_seconds=20)`
+- `research_report_result(job_id, include_report=false)`
+- `research_report_cancel(job_id)`
+
+For long reports, submit with `research_report_start`, batch long-poll with `research_reports_status`, and fetch the terminal audit/result separately. Relative dates are resolved and frozen at submission; pass `target_date` and `timezone` explicitly for repeatable reports.
 
 The MCP server is also packaged as a local console entry point. From this checkout, validate it with:
 
 ```bash
-uvx --from . gpt-researcher
+uv run --directory . gpt-researcher
 ```
 
-Use `uvx --from .` while developing this repository, and bump the package version whenever the packaged MCP entry point changes so uv rebuilds the local package instead of reusing the previous tool environment. The packaged entry point automatically reads uv's `direct_url.json` metadata to find the `--from` checkout and load its `.env`; `GPT_RESEARCHER_PROFILE_DIR` can still override that path if needed. A bare `uvx gpt-researcher` resolves the currently published PyPI package, so it will not include local checkout changes until a release is published.
+`uv run --directory` always executes the current checkout and avoids `uvx --refresh` cold starts or stale package cachebusters. `GPT_RESEARCHER_PROFILE_DIR` can still override the profile and `.env` directory.
 
-The MCP report tools treat failed attempts and low-quality reports as unstable runs. They use the configured smart LLM as a quality gate and retry the mixed retriever profile twice by default. Fallback is disabled unless `MCP_RESEARCH_FALLBACK_RETRIEVER` is explicitly set, because a weak single-source fallback can otherwise accept guessed market data. Successful reports return `fallback_used` plus an `attempts` audit trail. If all attempts fail, the server writes a `.failed.json` audit file and returns structured failure metadata instead of saving a misleading Markdown report.
+Each job writes a UUID-scoped, atomic audit directory. Coverage and unique HTTP evidence gates fail closed: failed jobs retain their spec, status, events, stderr, result, and manifest audit without publishing a misleading successful report. Terminal jobs are retained for 72 hours by default; running jobs found after a coordinator restart become `interrupted`.
+
+### OpenCode single-report and 3x3 stress harness
+
+For the repeatable Chinese quick-start, exact OpenCode/MCP tool sequence, artifact layout, immutable revalidation, and failure triage, see [docs/OPENCODE_MCP_WORKFLOW.md](docs/OPENCODE_MCP_WORKFLOW.md).
+
+The acceptance harness never reuses a run directory and never reads a report outside the current run. Its isolated OpenCode config denies every tool except `gpt-researcher-codex-long_*`. It emits OpenCode JSONL logs plus an atomic `manifest.json`, enforces a hard deadline, terminates the process tree, and fails if tracked child processes remain.
+
+Generate and statically validate the isolated OpenCode config without calling a model or research service:
+
+```bash
+DRY_RUN=1 scripts/opencode_stability_market_report.sh single
+DRY_RUN=1 scripts/opencode_stability_market_report.sh stress
+```
+
+Run one report, or start one persistent `opencode serve` and attach three simultaneous sessions that submit the same complete market-report question:
+
+```bash
+scripts/opencode_stability_market_report.sh single
+scripts/opencode_stability_market_report.sh stress
+```
+
+The live default uses `deepseek/deepseek-v4-pro` and requires `DEEPSEEK_API_KEY`. Override `MODEL`, `TARGET_DATE`, `REPORT_TIMEZONE`, or `HARNESS_TIMEOUT_SECONDS` as needed. `stress` passes only when all three reports complete their deterministic and LLM quality gates, all three durable worker intervals overlap, job start times span at most 10 seconds, `sum(job elapsed) / job wall time >= 2.0`, every report's three initial Codex processes genuinely overlap, the machine-wide Codex peak stays at or below nine, all 14 common index/commodity table values are comparable across the three reports without unexplained numeric/unit conflicts, and no tracked process survives cleanup.
+
+If a completed run needs to be evaluated after an acceptance-policy bug is fixed, revalidate it without changing the original reports or manifest. The output records the source manifest SHA-256 and every report SHA-256. Structured raw-evidence conflicts remain visible, while final report-table conflicts govern cross-report acceptance:
+
+```sh
+uv run python scripts/opencode_market_report_harness.py \
+  --revalidate-manifest outputs/stability/<run-id>/manifest.json \
+  --revalidation-output outputs/stability/<run-id>/revalidation.json
+```
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.

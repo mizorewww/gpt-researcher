@@ -118,6 +118,31 @@ HTTPS-only search smoke: 24.80s, output cited https://developers.openai.com/code
 
 ## Notes
 
-- The helper captures the final Codex response, not a normalized JSON source database.
+- Direct helper use captures the final Codex response. GPT Researcher retriever integration uses a JSON schema to normalize claims and real HTTP(S) sources into evidence items.
 - `--show-events` can print raw JSONL events for debugging.
-- GPT Researcher integration is implemented as `gpt_researcher.retrievers.codex.CodexSearch`, designed to return `[]` on timeout/failure so Tavily and other retrievers can continue.
+- GPT Researcher integration is implemented as `gpt_researcher.retrievers.codex.CodexSearch`; timeouts and transient failures are recorded per run so Tavily and other retrievers can continue while the report-level evidence gate still fails closed when coverage is insufficient.
+
+## Concurrent MCP delivery
+
+The long-report profile uses `search + medium + fast`, retains up to `12` source-addressable results per Codex call, and has two explicit concurrency layers:
+
+- Exactly three initial structured work items per report, each making one Codex call; the three initial calls run concurrently.
+- After initial evidence merging, at most one follow-up round can add up to three concurrent Codex-backed gap queries. This makes the per-report lifetime bound six calls while retaining a simultaneous per-report ceiling of three.
+- At most three isolated report workers run together, and the cross-process slot pool caps the machine at nine simultaneous Codex processes.
+- Four ordinary retrievers and five scraper workers inside each report worker.
+- A 2700-second job budget, a queue limit of nine, and 72-hour terminal-job retention.
+
+Strict market-daily work also uses keyless, allowlisted Yahoo Chart and HTML-history checks inside the same four ordinary-retriever slots. They produce dated, source-addressable evidence and fail softly per source. Deterministic index, commodity, and stock ledgers are given to the writer only for complete target-date rows: indices require two retrieved URLs; WTI, Brent, gold, and copper freeze the target-date Yahoo continuous-futures value, unit, contract basis, and a distinct corroborating URL; stocks require four rows per market with the required 2+2 selection mix. Draft citations are restricted to retrieved evidence and duplicate full-report stream restarts are repaired with an audit entry before judging. This grounding does not weaken the final fail-closed gate or increase Codex concurrency.
+
+The local MCP entry point is launched from the checkout with `uv run --directory ... gpt-researcher`. Long clients use `research_report_start`, batch long-poll with `research_reports_status`, fetch terminal data with `research_report_result`, and can terminate the worker tree with `research_report_cancel`.
+
+`scripts/opencode_stability_market_report.sh` provides two acceptance paths. `single` submits one report. `stress` starts one persistent `opencode serve` and launches three simultaneous `opencode run --attach` sessions with the same market-daily question. Both modes use a fresh XDG/job directory, JSONL logs, an atomic run manifest, a hard timeout, current-run-only artifact validation, and a residual-process check. Stress acceptance also requires three overlapping durable workers, three overlapping initial Codex calls per report, a global Codex peak no greater than nine, complete deterministic market coverage, and 14 common index/commodity values that can be parsed and compared across all three final reports without numeric or unit conflicts. Validate the complete setup without external calls using:
+
+The repeatable operator workflow, including quick commands, the MCP call protocol, artifact inspection, read-only revalidation, and failure triage, is documented in [`docs/OPENCODE_MCP_WORKFLOW.md`](../docs/OPENCODE_MCP_WORKFLOW.md). Run `scripts/opencode_stability_market_report.sh --help` for the short command reference.
+
+```sh
+DRY_RUN=1 scripts/opencode_stability_market_report.sh single
+DRY_RUN=1 scripts/opencode_stability_market_report.sh stress
+```
+
+The Python harness also supports read-only revalidation of an immutable prior run. It hashes the source manifest and all reports, preserves structured raw-evidence conflicts for audit, and recomputes acceptance from the final 14-value table comparison without rewriting the source artifacts.

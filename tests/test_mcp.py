@@ -25,11 +25,13 @@ Prerequisites:
 import asyncio
 import os
 import logging
+import pytest
 from typing import Dict, List, Any
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+pytestmark = pytest.mark.live
 
 # Get API keys from environment variables
 GITHUB_TOKEN = os.environ.get("GITHUB_PERSONAL_ACCESS_TOKEN")
@@ -266,4 +268,4 @@ if __name__ == "__main__":
     print("Testing Web Search (Tavily) and GitHub MCP integrations with optimal default settings.")
     print()
     
-    asyncio.run(main()) 
+    asyncio.run(main())

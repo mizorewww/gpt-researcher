@@ -1,6 +1,7 @@
 import sys
 import os
 import asyncio
+import pytest
 from dotenv import load_dotenv
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -23,6 +24,7 @@ multi_agents.agents.visualizer.call_model = mock_call_model
 
 load_dotenv()
 
+@pytest.mark.asyncio
 async def test_agents():
     # Mock research state
     state = {
