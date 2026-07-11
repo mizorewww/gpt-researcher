@@ -31,8 +31,8 @@ def _redact(value: object) -> str:
         ):
             text = text.replace(secret, "[REDACTED]")
     text = _SECRET_ASSIGNMENT_PATTERN.sub(r"\1[REDACTED]", text)
-    # A URL path such as /sk-hynix-... is evidence, not an API key. Requiring
-    # the token not to be adjacent to URL/path characters avoids corrupting
+    # A URL path that happens to begin with "sk-" is evidence, not an API key.
+    # Requiring the token not to be adjacent to URL/path characters avoids corrupting
     # failure-audit source URLs while still redacting standalone bearer keys.
     text = _OPENAI_KEY_PATTERN.sub("[REDACTED]", text)
     return text

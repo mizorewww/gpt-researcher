@@ -88,6 +88,7 @@ class WorkflowSpec:
     timeout_seconds: float
     persistent_server: bool
     allowed_tool_patterns: tuple[str, ...]
+    tool_call_budgets: dict[str, int]
     allowed_agents: tuple[str, ...]
     agent_tool_patterns: dict[str, tuple[str, ...]]
     allow_command_shell: bool
@@ -213,6 +214,7 @@ def load_workflow(path: str | Path) -> WorkflowSpec:
     security = _require_mapping(data.get("security"), "security")
     unknown_security = set(security) - {
         "allowedToolPatterns",
+        "toolCallBudgets",
         "allowedAgents",
         "agentToolPatterns",
         "allowCommandShell",
@@ -224,6 +226,25 @@ def load_workflow(path: str | Path) -> WorkflowSpec:
         "security.allowedToolPatterns",
         nonempty=True,
     )
+    tool_call_budget_value = _require_mapping(
+        security.get("toolCallBudgets", {}), "security.toolCallBudgets"
+    )
+    tool_call_budgets: dict[str, int] = {}
+    for pattern, limit in tool_call_budget_value.items():
+        if not isinstance(pattern, str) or not pattern:
+            raise ValueError(
+                "security.toolCallBudgets keys must be non-empty strings"
+            )
+        if pattern not in allowed_tools:
+            raise ValueError(
+                "security.toolCallBudgets keys must also appear in "
+                f"security.allowedToolPatterns: {pattern}"
+            )
+        if not isinstance(limit, int) or isinstance(limit, bool) or limit <= 0:
+            raise ValueError(
+                f"security.toolCallBudgets.{pattern} must be a positive integer"
+            )
+        tool_call_budgets[pattern] = limit
     allowed_agents = _string_list(
         security.get("allowedAgents"), "security.allowedAgents", nonempty=True
     )
@@ -293,6 +314,7 @@ def load_workflow(path: str | Path) -> WorkflowSpec:
         timeout_seconds=float(timeout_seconds),
         persistent_server=persistent_server,
         allowed_tool_patterns=allowed_tools,
+        tool_call_budgets=tool_call_budgets,
         allowed_agents=allowed_agents,
         agent_tool_patterns=agent_tool_patterns,
         allow_command_shell=allow_command_shell,

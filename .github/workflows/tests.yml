@@ -32,10 +32,5 @@ jobs:
           PYTHONHASHSEED: "0"
         run: uv run pytest
 
-      - name: Dry-run single and three-report OpenCode harnesses
-        env:
-          DRY_RUN: "1"
-          RUNTIME_BASE_DIR: "${{ runner.temp }}/gpt-researcher-harness"
-        run: |
-          RUN_ID=ci-single scripts/opencode_stability_market_report.sh single
-          RUN_ID=ci-stress scripts/opencode_stability_market_report.sh stress
+      - name: Validate reusable workflow metadata
+        run: scripts/research_workflow.sh list

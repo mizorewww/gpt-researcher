@@ -117,8 +117,6 @@ GPT Researcher plans exactly three initial structured research work items and ex
 
 This yields exactly three initial Codex calls and at most six Codex calls over the lifetime of one report. The per-report semaphore remains `3`, so the initial calls or follow-up calls can overlap three at a time, but a report never runs more than three Codex processes simultaneously. `CODEX_SEARCH_MAX_RESULTS=12` retains up to twelve source-addressable results from each call. This is intentionally different from using Codex as a separate report writer: Codex is a search retriever here, while GPT Researcher still owns planning, compression, and final report writing.
 
-Market-daily acceptance adds narrowly scoped, keyless history checks without changing the Codex call budget. The initial U.S. index, commodity, and stock lanes and the three Asian regional gaps use Yahoo Chart plus allowlisted server-rendered history pages in the shared four-slot ordinary-retriever pool. They emit the same source-addressable `EvidenceItem` format and fail softly per URL. Exact index values are exposed through a deterministic two-source ledger; WTI, Brent, gold, and copper use a second ledger that freezes the target-date Yahoo continuous-futures value, unit, basis, and a distinct corroborating URL; and a stock ledger fixes four evidence-backed rows per market (two leaders plus two largest absolute movers). Incomplete ledgers are never filled with guesses. Draft URLs are restricted to retrieved evidence before the quality gate, and any detected duplicate full-report stream restart is repaired with an audit entry.
-
 Run a report with the current `.env` profile:
 
 ```sh
@@ -127,7 +125,9 @@ Run a report with the current `.env` profile:
 
 Performance note: `search` mode is the default stability profile. `plan-exec` first asks Codex to plan and then runs a search-enabled pass, so every generated GPT Researcher sub-query can become two Codex CLI invocations. Use it only for targeted one-off searches where the extra latency is acceptable.
 
-To repeat the verified OpenCode single-report or 3×3 load workflow, use `scripts/opencode_stability_market_report.sh --help` and follow the Chinese operator guide at [`docs/OPENCODE_MCP_WORKFLOW.md`](../docs/OPENCODE_MCP_WORKFLOW.md).
+The OpenCode workflow runner is a separate, domain-neutral execution path. Use
+`scripts/research_workflow.sh` and follow the operator guide at
+[`docs/GENERIC_RESEARCH_WORKFLOWS.md`](../docs/GENERIC_RESEARCH_WORKFLOWS.md).
 
 ## MCP Profile
 

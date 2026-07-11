@@ -53,6 +53,11 @@
           "uniqueItems": true,
           "items": {"type": "string", "minLength": 1}
         },
+        "toolCallBudgets": {
+          "type": "object",
+          "propertyNames": {"type": "string", "minLength": 1},
+          "additionalProperties": {"type": "integer", "minimum": 1}
+        },
         "allowedAgents": {
           "type": "array",
           "minItems": 1,

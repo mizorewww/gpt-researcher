@@ -1,12 +1,16 @@
 ---
-description: Submit one frozen-date market report to GPT Researcher and audit its terminal result.
+description: Run the complete frozen-date multi-market investigation from canonical JSON input.
 agent: market-coordinator
 ---
 
-Run the market-daily workflow using this canonical input:
+Execute this OpenCode project's market-daily task using its task context,
+configured agent roles, available skills, evidence capabilities, and output contract.
+
+Canonical input:
 
 ```json
 $ARGUMENTS
 ```
 
-Follow AGENTS.md exactly. Use the market skill, submit one MCP report job, long-poll it to a terminal state, fetch its lightweight result, and have the market auditor check the outcome. Do not compensate for a failed quality gate with unsourced prose.
+Preserve every explicit requirement in the canonical input. Return the complete result
+under the configured output contract and fail closed on blocking evidence gaps.

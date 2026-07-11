@@ -13,6 +13,7 @@ import sys
 import tempfile
 import time
 import uuid
+from collections import Counter
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -29,6 +30,8 @@ from .config import WorkflowSpec, load_workflow
 
 _FORMAT_CHECKER = FormatChecker()
 _RUN_ID_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,126}[A-Za-z0-9])?$")
+_HTTP_URL_RE = re.compile(r"https?://[^\s<>\[\]()|]+", re.IGNORECASE)
+_TOOL_PERMISSION_RE = re.compile(r"\bevaluated permission=([^\s]+)")
 _SAFE_INHERITED_ENV = {
     "PATH",
     "HOME",
@@ -148,8 +151,12 @@ def _redact(text: str, env: dict[str, str]) -> str:
         ):
             redacted = redacted.replace(value, f"<redacted:{key}>")
     redacted = re.sub(r"\bsk-[A-Za-z0-9_-]{16,}\b", "<redacted:key>", redacted)
-    redacted = re.sub(r"(?i)(authorization:\s*(?:bearer|basic)\s+)\S+", r"\1<redacted>", redacted)
-    redacted = re.sub(r"([a-z][a-z0-9+.-]*://[^:/\s]+:)[^@/\s]+@", r"\1<redacted>@", redacted)
+    redacted = re.sub(
+        r"(?i)(authorization:\s*(?:bearer|basic)\s+)\S+", r"\1<redacted>", redacted
+    )
+    redacted = re.sub(
+        r"([a-z][a-z0-9+.-]*://[^:/\s]+:)[^@/\s]+@", r"\1<redacted>@", redacted
+    )
     return redacted[-4000:]
 
 
@@ -196,6 +203,7 @@ class SessionRun:
     response_sha256: str | None = None
     session_id: str | None = None
     tool_calls: tuple[str, ...] = ()
+    http_sources: tuple[str, ...] = ()
     result: dict[str, Any] | None = None
     errors: tuple[str, ...] = ()
 
@@ -225,6 +233,131 @@ class EventLog:
             handle.write("\n")
 
 
+class ToolPermissionLogMonitor:
+    """Incrementally count OpenCode permission decisions for one isolated run."""
+
+    def __init__(self, path: Path) -> None:
+        self.path = path
+        self.counts: dict[str, int] = {}
+        self.coverage = "unavailable"
+        self.error: str | None = None
+        self._handle: Any | None = None
+        self._identity: tuple[int, int] | None = None
+        self._offset = 0
+        self._partial = b""
+        self._tail = b""
+        self._tail_start = 0
+        try:
+            if path.is_file():
+                self._open(start_at_end=True)
+        except OSError as exc:
+            self._mark_error(exc)
+
+    def _mark_incomplete(self, reason: str) -> None:
+        if self.coverage != "error":
+            self.coverage = "incomplete"
+        if self.error is None:
+            self.error = reason
+
+    def _mark_error(self, exc: OSError) -> None:
+        self.coverage = "error"
+        self.error = f"{type(exc).__name__}: {exc}"
+
+    def _open(self, *, start_at_end: bool) -> None:
+        handle = self.path.open("rb")
+        stat = os.fstat(handle.fileno())
+        self._handle = handle
+        self._identity = (stat.st_dev, stat.st_ino)
+        if start_at_end:
+            handle.seek(0, os.SEEK_END)
+        self._offset = handle.tell()
+        if self.coverage == "unavailable":
+            self.coverage = "complete"
+        self._remember_tail()
+
+    def _remember_tail(self) -> None:
+        if self._handle is None:
+            return
+        position = self._handle.tell()
+        self._tail_start = max(0, position - 64)
+        self._handle.seek(self._tail_start)
+        self._tail = self._handle.read(position - self._tail_start)
+        self._handle.seek(position)
+
+    def _tail_matches(self) -> bool:
+        if self._handle is None or not self._tail:
+            return True
+        position = self._handle.tell()
+        self._handle.seek(self._tail_start)
+        actual = self._handle.read(len(self._tail))
+        self._handle.seek(position)
+        return actual == self._tail
+
+    def _consume(self, chunk: bytes, *, final: bool) -> None:
+        buffered = self._partial + chunk
+        lines = buffered.split(b"\n")
+        self._partial = lines.pop()
+        if final and self._partial:
+            lines.append(self._partial)
+            self._partial = b""
+        for raw_line in lines:
+            match = _TOOL_PERMISSION_RE.search(
+                raw_line.decode("utf-8", errors="replace")
+            )
+            if match:
+                tool = match.group(1)
+                self.counts[tool] = self.counts.get(tool, 0) + 1
+
+    def _drain(self, *, final: bool) -> None:
+        if self._handle is None:
+            return
+        chunk = self._handle.read()
+        self._offset = self._handle.tell()
+        self._consume(chunk, final=final)
+        self._remember_tail()
+
+    def _close(self) -> None:
+        if self._handle is not None:
+            self._handle.close()
+        self._handle = None
+
+    def poll(self, *, final: bool = False) -> dict[str, int]:
+        try:
+            if self._handle is None:
+                if not self.path.is_file():
+                    return dict(self.counts)
+                self._open(start_at_end=False)
+
+            try:
+                path_stat = self.path.stat()
+            except FileNotFoundError:
+                self._mark_incomplete("permission log disappeared during the run")
+                self._drain(final=True)
+                self._close()
+                return dict(self.counts)
+
+            identity = (path_stat.st_dev, path_stat.st_ino)
+            if identity != self._identity:
+                self._mark_incomplete("permission log rotated during the run")
+                self._drain(final=True)
+                self._close()
+                self._open(start_at_end=False)
+            elif path_stat.st_size < self._offset or not self._tail_matches():
+                self._mark_incomplete("permission log was truncated during the run")
+                self._handle.seek(0)
+                self._offset = 0
+                self._partial = b""
+                self._tail = b""
+
+            self._drain(final=final)
+            if final:
+                self._close()
+        except OSError as exc:
+            self._mark_error(exc)
+            self._close()
+        return dict(self.counts)
+
+
 def make_layout(
     project_root: Path,
     workflow_name: str,
@@ -233,7 +366,9 @@ def make_layout(
 ) -> RunLayout:
     validate_run_id(run_id)
     base = base_dir or project_root
-    project_fingerprint = hashlib.sha256(str(project_root).encode("utf-8")).hexdigest()[:12]
+    project_fingerprint = hashlib.sha256(str(project_root).encode("utf-8")).hexdigest()[
+        :12
+    ]
     base_fingerprint = hashlib.sha256(str(base).encode("utf-8")).hexdigest()[:12]
     # A caller-controlled artifact directory may itself be another Git worktree.
     # Runtime placement must never inherit that tree's AGENTS.md or OpenCode config.
@@ -346,8 +481,16 @@ def workflow_environment(
             "RESEARCH_WORKFLOW_ARTIFACT_DIR": str(layout.artifact_dir),
             "RESEARCH_WORKFLOW_JOBS_DIR": str(layout.jobs_dir),
             "RESEARCH_WORKFLOW_CODEX_SLOT_DIR": str(layout.codex_slots_dir),
-            "RESEARCH_WORKFLOW_GLOBAL_JOB_SLOT_DIR": str(
-                layout.global_job_slots_dir
+            "RESEARCH_WORKFLOW_GLOBAL_JOB_SLOT_DIR": str(layout.global_job_slots_dir),
+            "RESEARCH_WORKFLOW_UV_CACHE_DIR": str(
+                Path(os.getenv("UV_CACHE_DIR", Path.home() / ".cache" / "uv"))
+                .expanduser()
+                .resolve()
+            ),
+            "RESEARCH_WORKFLOW_NPM_CACHE_DIR": str(
+                Path(os.getenv("NPM_CONFIG_CACHE", Path.home() / ".npm"))
+                .expanduser()
+                .resolve()
             ),
             "GPT_RESEARCHER_PROFILE_DIR": str(project_root),
             "RESEARCH_WORKFLOW_GPTR_BIN": shutil.which("gpt-researcher")
@@ -420,9 +563,7 @@ def _run_preflight_command(
             output.seek(0)
             stdout = output.read()
 
-        descendants = {
-            identity for identity in tracked if identity.pid != process.pid
-        }
+        descendants = {identity for identity in tracked if identity.pid != process.pid}
         live_descendants = _live_identities(descendants)
         cleanup_deadline = time.monotonic() + 1
         while live_descendants and time.monotonic() < cleanup_deadline:
@@ -431,9 +572,7 @@ def _run_preflight_command(
         if live_descendants:
             detected = [identity.pid for identity in live_descendants]
             _kill_tracked_identities(live_descendants)
-            raise RuntimeError(
-                f"command left child processes after exit: {detected}"
-            )
+            raise RuntimeError(f"command left child processes after exit: {detected}")
         return subprocess.CompletedProcess(command, process.returncode, stdout)
     except BaseException:
         # Preflight and validators can start local MCP servers. Clean them on
@@ -543,7 +682,9 @@ def preflight(
     skills = _parse_skill_names(skills_run.stdout.decode("utf-8", errors="replace"))
     missing_skills = sorted(set(spec.required_skills) - set(skills))
     if missing_skills:
-        raise RuntimeError(f"required workflow skills were not discovered: {missing_skills}")
+        raise RuntimeError(
+            f"required workflow skills were not discovered: {missing_skills}"
+        )
 
     mcp_run = _run_preflight_command(
         [opencode_bin, "mcp", "list", "--pure"], snapshot, env, timeout=120
@@ -584,7 +725,9 @@ def wait_for_tcp(port: int, process: subprocess.Popen[bytes], timeout: float) ->
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         if process.poll() is not None:
-            raise RuntimeError(f"opencode serve exited with status {process.returncode}")
+            raise RuntimeError(
+                f"opencode serve exited with status {process.returncode}"
+            )
         try:
             with socket.create_connection(("127.0.0.1", port), timeout=0.2):
                 return
@@ -634,8 +777,7 @@ def start_opencode_server(
             except OSError:
                 output = ""
             address_in_use = (
-                "EADDRINUSE" in output
-                or "address already in use" in output.lower()
+                "EADDRINUSE" in output or "address already in use" in output.lower()
             )
             if isinstance(exc, RuntimeError) and address_in_use and attempt < 2:
                 continue
@@ -761,7 +903,9 @@ def _render_input(value: str) -> str:
         decoded = json.loads(stripped)
     except json.JSONDecodeError:
         decoded = {"query": value}
-    return json.dumps(decoded, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return json.dumps(
+        decoded, ensure_ascii=False, sort_keys=True, separators=(",", ":")
+    )
 
 
 def _decode_marker(response: str, marker: str) -> dict[str, Any] | None:
@@ -820,12 +964,17 @@ def parse_session_log(
         except ValidationError as exc:
             errors.append(f"result schema validation failed: {exc.message}")
         if result.get("status") != "completed":
-            errors.append(f"workflow result status is not completed: {result.get('status')!r}")
+            errors.append(
+                f"workflow result status is not completed: {result.get('status')!r}"
+            )
     unauthorized = sorted(
         {
             tool
             for tool in tools
-            if not any(fnmatch.fnmatchcase(tool, pattern) for pattern in spec.allowed_tool_patterns)
+            if not any(
+                fnmatch.fnmatchcase(tool, pattern)
+                for pattern in spec.allowed_tool_patterns
+            )
         }
     )
     if unauthorized:
@@ -834,6 +983,14 @@ def parse_session_log(
     run.response_sha256 = _sha256_bytes(response_path.read_bytes())
     run.session_id = session_id
     run.tool_calls = tuple(tools)
+    run.http_sources = tuple(
+        sorted(
+            {
+                match.group(0).rstrip(".,;:!?\"'")
+                for match in _HTTP_URL_RE.finditer(response)
+            }
+        )
+    )
     run.result = result
     run.errors = tuple(errors)
 
@@ -866,8 +1023,141 @@ def _serialize_session(run: SessionRun) -> dict[str, Any]:
         "response_path": str(run.response_path) if run.response_path else None,
         "response_sha256": run.response_sha256,
         "tool_calls": list(run.tool_calls),
+        "http_sources": list(run.http_sources),
+        "http_sources_count": len(run.http_sources),
         "result": run.result,
         "errors": list(run.errors),
+    }
+
+
+def _nested_tool_call_counts(
+    layout: RunLayout,
+) -> tuple[Path, dict[str, int], str, str | None]:
+    """Count permission decisions across primary and nested OpenCode agents."""
+
+    audit_log = layout.xdg_data / "opencode" / "log" / "opencode.log"
+    counts: dict[str, int] = {}
+    try:
+        if not audit_log.is_file():
+            return audit_log, counts, "unavailable", None
+        with audit_log.open("r", encoding="utf-8", errors="replace") as handle:
+            for line in handle:
+                match = _TOOL_PERMISSION_RE.search(line)
+                if match:
+                    tool = match.group(1)
+                    counts[tool] = counts.get(tool, 0) + 1
+        return audit_log, counts, "complete", None
+    except OSError as exc:
+        return audit_log, counts, "error", f"{type(exc).__name__}: {exc}"
+
+
+def _tool_budget_violations(
+    counts: dict[str, int],
+    budgets: dict[str, int],
+    replicas: int,
+) -> list[dict[str, int | str]]:
+    """Return aggregate violations for per-root-session tool budgets."""
+
+    violations: list[dict[str, int | str]] = []
+    for pattern, configured_limit in budgets.items():
+        effective_limit = configured_limit * replicas
+        count = sum(
+            value
+            for tool, value in counts.items()
+            if fnmatch.fnmatchcase(tool, pattern)
+        )
+        if count > effective_limit:
+            violations.append(
+                {
+                    "pattern": pattern,
+                    "count": count,
+                    "configured_per_replica": configured_limit,
+                    "effective_limit": effective_limit,
+                }
+            )
+    return violations
+
+
+def _opencode_tool_audit(
+    layout: RunLayout,
+    runs: Iterable[SessionRun],
+    allowed_patterns: Iterable[str],
+    tool_call_budgets: dict[str, int] | None = None,
+    replicas: int = 1,
+    monitored_counts: dict[str, int] | None = None,
+    permission_log_coverage: str | None = None,
+    permission_log_error: str | None = None,
+) -> dict[str, Any]:
+    """Collect root and nested-agent tool permissions from this isolated run."""
+
+    root_calls = [tool for run in runs for tool in run.tool_calls]
+    if monitored_counts is None:
+        audit_log, counts, coverage, audit_error = _nested_tool_call_counts(layout)
+    else:
+        audit_log = layout.xdg_data / "opencode" / "log" / "opencode.log"
+        counts = dict(monitored_counts)
+        coverage = permission_log_coverage or "unavailable"
+        audit_error = permission_log_error
+    root_counts = Counter(root_calls)
+    missing_root_calls = {
+        tool: expected - counts.get(tool, 0)
+        for tool, expected in root_counts.items()
+        if counts.get(tool, 0) < expected
+    }
+    if coverage == "complete" and missing_root_calls:
+        coverage = "incomplete"
+        audit_error = "permission log omitted root-session tool calls"
+    # The isolated permission log covers the full agent tree. Root JSONL is a
+    # fallback only; combining the two would count primary calls twice.
+    count_source = "opencode_permission_log"
+    if coverage == "unavailable":
+        count_source = "root_session_jsonl"
+        for tool in root_calls:
+            counts[tool] = counts.get(tool, 0) + 1
+    elif coverage != "complete":
+        count_source = "opencode_permission_log_partial"
+    observed = set(root_calls) | set(counts)
+    patterns = tuple(allowed_patterns)
+    unauthorized = sorted(
+        tool
+        for tool in observed
+        if not any(fnmatch.fnmatchcase(tool, pattern) for pattern in patterns)
+    )
+    budgets = dict(tool_call_budgets or {})
+    detected_violations = _tool_budget_violations(counts, budgets, replicas)
+    violations = detected_violations if coverage == "complete" else []
+    untrusted_violations = detected_violations if coverage != "complete" else []
+    matched_usage = {
+        pattern: sum(
+            count
+            for tool, count in counts.items()
+            if fnmatch.fnmatchcase(tool, pattern)
+        )
+        for pattern in budgets
+    }
+    missing_budget_audit = bool(budgets and coverage != "complete")
+    return {
+        "passed": not unauthorized and not violations and not missing_budget_audit,
+        "observed": sorted(observed),
+        "counts": dict(sorted(counts.items())),
+        "count_source": count_source,
+        "unauthorized": unauthorized,
+        "budgets": {
+            "configured_per_replica": budgets,
+            "replicas": replicas,
+            "effective": {
+                pattern: limit * replicas for pattern, limit in budgets.items()
+            },
+            "matched_usage": matched_usage,
+            "coverage": coverage,
+            "audit_error": audit_error,
+            "missing_root_calls": missing_root_calls,
+            "enforcement_scope": "run_aggregate",
+            "limit_semantics": "configured_per_replica_scaled_by_replicas",
+        },
+        "budget_violations": violations,
+        "untrusted_budget_violations": untrusted_violations,
+        "nested_audit_log": str(audit_log) if audit_log.is_file() else None,
     }
 
 
@@ -887,8 +1177,7 @@ def _run_validators(
     for validator in spec.validators:
         started = time.monotonic()
         command = [
-            item.replace("{python}", sys.executable)
-            for item in validator.command
+            item.replace("{python}", sys.executable) for item in validator.command
         ]
         completed = _run_preflight_command(
             command,
@@ -946,9 +1235,7 @@ def run_workflow(
     elif len(input_values) != selected_replicas:
         raise ValueError("provide exactly one input or one input per replica")
     canonical_inputs = [_render_input(value) for value in input_values]
-    input_schema = json.loads(
-        source_spec.input_schema_path.read_text(encoding="utf-8")
-    )
+    input_schema = json.loads(source_spec.input_schema_path.read_text(encoding="utf-8"))
     for index, value in enumerate(canonical_inputs, 1):
         try:
             validate_json(json.loads(value), input_schema)
@@ -1012,6 +1299,15 @@ def run_workflow(
         "missing_required_env": missing_env,
         "security": {
             "allowed_tool_patterns": list(spec.allowed_tool_patterns),
+            "tool_call_budgets_per_replica": dict(spec.tool_call_budgets),
+            "effective_tool_call_budgets": {
+                pattern: limit * selected_replicas
+                for pattern, limit in spec.tool_call_budgets.items()
+            },
+            "tool_call_budget_enforcement_scope": "run_aggregate",
+            "tool_call_budget_limit_semantics": (
+                "configured_per_replica_scaled_by_replicas"
+            ),
             "allowed_agents": list(spec.allowed_agents),
             "agent_tool_patterns": {
                 name: list(patterns)
@@ -1028,7 +1324,9 @@ def run_workflow(
         "inputs": input_records,
     }
     atomic_write_json(layout.manifest_path, manifest)
-    event_log.emit("workflow_initialized", workflow=spec.name, replicas=selected_replicas)
+    event_log.emit(
+        "workflow_initialized", workflow=spec.name, replicas=selected_replicas
+    )
     try:
         preflight_result = preflight(spec, layout.snapshot_dir, env, binary)
     except Exception as exc:
@@ -1061,6 +1359,9 @@ def run_workflow(
     serve: subprocess.Popen[bytes] | None = None
     serve_handle: Any | None = None
     runs: list[SessionRun] = []
+    tool_monitor = ToolPermissionLogMonitor(
+        layout.xdg_data / "opencode" / "log" / "opencode.log"
+    )
     tracked_processes: set[ProcessIdentity] = set()
     failure: str | None = None
     wall_started = time.monotonic()
@@ -1123,13 +1424,12 @@ def run_workflow(
             runs.append(run)
             event_log.emit("session_started", index=index, pid=process.pid)
         deadline = wall_started + deadline_seconds
+        next_tool_budget_check = 0.0
         while any(run.exit_code is None for run in runs):
             for run in runs:
                 if run.exit_code is not None:
                     continue
-                tracked_processes.update(
-                    _descendant_identities(run.process.pid)
-                )
+                tracked_processes.update(_descendant_identities(run.process.pid))
                 exit_code = run.process.poll()
                 if exit_code is None:
                     continue
@@ -1152,9 +1452,37 @@ def run_workflow(
             if serve is not None:
                 tracked_processes.update(_descendant_identities(serve.pid))
                 if serve.poll() is not None:
-                    raise RuntimeError(f"opencode serve exited with status {serve.returncode}")
+                    raise RuntimeError(
+                        f"opencode serve exited with status {serve.returncode}"
+                    )
+            now = time.monotonic()
+            if spec.tool_call_budgets and now >= next_tool_budget_check:
+                live_tool_counts = tool_monitor.poll()
+                if tool_monitor.coverage in {"incomplete", "error"}:
+                    raise RuntimeError(
+                        "tool call budget audit "
+                        f"{tool_monitor.coverage}: {tool_monitor.error or 'unknown error'}"
+                    )
+                budget_violations = _tool_budget_violations(
+                    live_tool_counts,
+                    spec.tool_call_budgets,
+                    selected_replicas,
+                )
+                if budget_violations:
+                    event_log.emit(
+                        "tool_call_budget_exceeded",
+                        violations=budget_violations,
+                    )
+                    details = ", ".join(
+                        f"{item['pattern']}={item['count']}/{item['effective_limit']}"
+                        for item in budget_violations
+                    )
+                    raise RuntimeError(f"tool call budget exceeded: {details}")
+                next_tool_budget_check = now + 0.25
             if time.monotonic() >= deadline:
-                raise TimeoutError(f"workflow timeout reached after {deadline_seconds}s")
+                raise TimeoutError(
+                    f"workflow timeout reached after {deadline_seconds}s"
+                )
             time.sleep(0.05)
     except (Exception, KeyboardInterrupt) as exc:
         failure = f"{type(exc).__name__}: {exc}"
@@ -1182,8 +1510,56 @@ def run_workflow(
     orphan_identities = _live_identities(tracked_processes)
     orphan_pids_detected = [identity.pid for identity in orphan_identities]
     orphan_pids = _kill_tracked_identities(orphan_identities)
+    monitored_tool_counts = tool_monitor.poll(final=True)
     validator_results: list[dict[str, Any]] = []
     integrity = snapshot_integrity(layout.snapshot_dir, workflow_hash)
+    try:
+        tool_audit = _opencode_tool_audit(
+            layout,
+            runs,
+            spec.allowed_tool_patterns,
+            spec.tool_call_budgets,
+            selected_replicas,
+            monitored_tool_counts,
+            tool_monitor.coverage,
+            tool_monitor.error,
+        )
+    except Exception as exc:
+        audit_error = f"{type(exc).__name__}: {exc}"
+        tool_audit = {
+            "passed": False,
+            "observed": sorted({tool for run in runs for tool in run.tool_calls}),
+            "counts": dict(sorted(monitored_tool_counts.items())),
+            "count_source": "audit_error",
+            "unauthorized": [],
+            "budgets": {
+                "configured_per_replica": dict(spec.tool_call_budgets),
+                "replicas": selected_replicas,
+                "effective": {
+                    pattern: limit * selected_replicas
+                    for pattern, limit in spec.tool_call_budgets.items()
+                },
+                "matched_usage": {},
+                "coverage": "error",
+                "audit_error": audit_error,
+                "missing_root_calls": {},
+                "enforcement_scope": "run_aggregate",
+                "limit_semantics": ("configured_per_replica_scaled_by_replicas"),
+            },
+            "budget_violations": [],
+            "untrusted_budget_violations": [],
+            "nested_audit_log": None,
+        }
+    if (
+        spec.tool_call_budgets
+        and tool_audit["budgets"]["coverage"] != "complete"
+        and failure is None
+    ):
+        failure = f"tool call budget audit {tool_audit['budgets']['coverage']}"
+    if tool_audit["unauthorized"] and failure is None:
+        failure = f"unauthorized nested agent tool calls: {tool_audit['unauthorized']}"
+    if tool_audit["budget_violations"] and failure is None:
+        failure = f"tool call budget exceeded: {tool_audit['budget_violations']}"
     base_passed = (
         failure is None
         and len(runs) == selected_replicas
@@ -1193,7 +1569,11 @@ def run_workflow(
     )
     manifest.update(
         {
-            "status": "validating" if base_passed and spec.validators else "completed" if base_passed else "failed",
+            "status": "validating"
+            if base_passed and spec.validators
+            else "completed"
+            if base_passed
+            else "failed",
             "finished_at": iso_now(),
             "wall_seconds": round(time.monotonic() - wall_started, 3),
             "failure": failure,
@@ -1201,6 +1581,7 @@ def run_workflow(
             "sessions": [_serialize_session(run) for run in runs],
             "orphan_pids": orphan_pids,
             "orphan_pids_detected": orphan_pids_detected,
+            "tool_audit": tool_audit,
             "snapshot_integrity": integrity,
         }
     )
@@ -1209,7 +1590,9 @@ def run_workflow(
         try:
             validator_results = _run_validators(spec, layout, env)
         except (subprocess.SubprocessError, OSError) as exc:
-            validator_results = [{"name": "runner", "exit_code": None, "error": str(exc)}]
+            validator_results = [
+                {"name": "runner", "exit_code": None, "error": str(exc)}
+            ]
         manifest["validators"] = validator_results
         integrity = snapshot_integrity(layout.snapshot_dir, workflow_hash)
         manifest["snapshot_integrity"] = integrity
@@ -1222,5 +1605,7 @@ def run_workflow(
         )
         manifest["finished_at"] = iso_now()
         atomic_write_json(layout.manifest_path, manifest)
-    event_log.emit("workflow_finished", status=manifest["status"], orphan_pids=orphan_pids)
+    event_log.emit(
+        "workflow_finished", status=manifest["status"], orphan_pids=orphan_pids
+    )
     return manifest

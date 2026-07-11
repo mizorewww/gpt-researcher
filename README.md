@@ -157,6 +157,8 @@ report = await researcher.write_report()
 
 ### Local Tavily + Codex Long Search Profile
 
+This section documents GPT Researcher's direct Python, CLI, and MCP backend. It is independent of the OpenCode-native workflow system described below. Clients may choose this backend API, but its endpoints and lifecycle are not a required OpenCode workflow protocol.
+
 This checkout includes a bounded, concurrent Tavily + Codex research profile. A report is planned into exactly three initial structured work items, and each work item makes one initial Codex call; those three calls run concurrently. After the initial evidence is merged, one bounded gap-check round may issue at most three additional Codex-backed follow-up queries concurrently. A report therefore makes exactly three initial Codex calls and at most six Codex calls in total, while never running more than three at once. Writer or judge retries do not repeat the completed retrieval stage.
 
 One-line local report command:
@@ -186,7 +188,6 @@ MCP_RESEARCH_JUDGE_TIMEOUT=120
 SEARCH_RETRIEVER_CONCURRENCY=4
 MAX_SCRAPER_WORKERS=5
 RESEARCH_MIN_HTTP_SOURCES_PER_WORK_ITEM=8
-RESEARCH_MIN_STOCK_SOURCES_PER_MARKET=4
 RESEARCH_MIN_TOTAL_HTTP_SOURCES=25
 CODEX_SEARCH_MODE=search
 CODEX_SEARCH_TIMEOUT=300
@@ -205,9 +206,7 @@ When `CODEX_SEARCH_SERVICE_TIER=fast`, the helper passes both `service_tier="fas
 
 The tested profile is `search + medium + fast`, with up to `12` source-addressable results retained from each Codex call. The MCP coordinator admits at most three isolated report workers and queues at most nine more jobs. Each report can make up to six Codex calls over its lifetime (three initial plus at most three follow-ups), but its per-report semaphore allows only three simultaneous Codex processes. The cross-process slot pool therefore enforces a machine-wide ceiling of nine simultaneous Codex processes across the three workers. A worker uses at most four ordinary retrievers and five scrapers. Every checkout and installed runner shares `~/.gpt-researcher/slots` by default; set `GPT_RESEARCHER_GLOBAL_SLOT_ROOT` only when all coordinator processes use the same alternative writable directory.
 
-For strict market-daily reports, the single gap round is reserved for Japan, Korea, and Hong Kong whenever any regional stock gap remains. Keyless, allowlisted market-history supplements run inside the same four-slot ordinary-retriever pool: Yahoo Chart supplies exact target/previous-session closes for the required index, commodity-futures, and stock pools, while server-rendered historical pages provide independent index checks, including sparse surfaces such as TOPIX and Hang Seng TECH. Every observation is converted to `EvidenceItem` records with an exact date, unit, deep source URL, and checksum; an unavailable or ambiguous page fails softly per source. The writer receives deterministic index, commodity, and stock row ledgers: index and commodity rows require a canonical value plus two retrieved URLs, the commodity ledger also freezes unit and continuous-contract basis, and the stock ledger selects two configured liquid leaders and the two largest absolute target-day movers per market. Before judging, an evidence-URL allow-list restores only conservatively equivalent URLs and removes invented link targets; any duplicate full-report stream restart is repaired and recorded. The report still fails closed if any required row remains incomplete.
-
-For MCP clients, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`. It starts this checkout with `uv run --directory ...` and exposes:
+For clients that explicitly choose the direct GPT Researcher MCP API, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`. It starts this checkout with `uv run --directory ...` and exposes:
 
 - `profile_info`
 - `research_report` for compatibility and short requests
@@ -217,7 +216,7 @@ For MCP clients, use the checked-in `.mcp.json` server `gpt-researcher-codex-lon
 - `research_report_result(job_id, include_report=false)`
 - `research_report_cancel(job_id)`
 
-For long reports, submit with `research_report_start`, batch long-poll with `research_reports_status`, and fetch the terminal audit/result separately. Relative dates are resolved and frozen at submission; pass `target_date` and `timezone` explicitly for repeatable reports.
+Within that direct API, long reports can be submitted with `research_report_start`, batch long-polled with `research_reports_status`, and fetched with `research_report_result`. These are backend API semantics, not instructions that an OpenCode workflow must place in `AGENTS.md` or follow as a fixed tool sequence. Relative dates are resolved and frozen at submission; pass `target_date` and `timezone` explicitly for repeatable reports.
 
 The MCP server is also packaged as a local console entry point. From this checkout, validate it with:
 
@@ -229,11 +228,9 @@ uv run --directory . gpt-researcher
 
 Each job writes a UUID-scoped, atomic audit directory. Coverage and unique HTTP evidence gates fail closed: failed jobs retain their spec, status, events, stderr, result, and manifest audit without publishing a misleading successful report. Terminal jobs are retained for 72 hours by default; running jobs found after a coordinator restart become `interrupted`.
 
-### OpenCode single-report and 3x3 stress harness
+### OpenCode-native research workflows
 
-For the repeatable Chinese quick-start, exact OpenCode/MCP tool sequence, artifact layout, immutable revalidation, and failure triage, see [docs/OPENCODE_MCP_WORKFLOW.md](docs/OPENCODE_MCP_WORKFLOW.md).
-
-For general research, do not modify the market harness. Create an OpenCode-native workflow whose own `AGENTS.md`, agents, skills, command, schemas, and MCP configuration define the investigation:
+Create an OpenCode-native workflow whose `AGENTS.md` contains the task context, while its agents, skills, command, schemas, and MCP configuration define the domain-specific investigation:
 
 ```bash
 scripts/research_workflow.sh init company-intelligence
@@ -242,33 +239,27 @@ scripts/research_workflow.sh run research_workflows/company-intelligence \
   --input 'Investigate the company, its market, competitors, evidence, and risks.'
 ```
 
-See the [generic workflow guide](docs/GENERIC_RESEARCH_WORKFLOWS.md). The market harness below remains a domain-specific acceptance and load test.
+See the [generic workflow guide](docs/GENERIC_RESEARCH_WORKFLOWS.md). The generic runner owns process and session scheduling, isolated snapshots, deny-by-default permissions, per-replica tool-budget configuration with aggregate enforcement, schemas, manifests, deadlines, and process cleanup; it contains no market-specific protocol. A workflow does not need to call `profile_info` or any `research_report_*` tool unless its own MCP choice genuinely requires that direct backend.
 
-The acceptance harness never reuses a run directory and never reads a report outside the current run. Its isolated OpenCode config denies every tool except `gpt-researcher-codex-long_*`. It emits OpenCode JSONL logs plus an atomic `manifest.json`, enforces a hard deadline, terminates the process tree, and fails if tracked child processes remain.
-
-Generate and statically validate the isolated OpenCode config without calling a model or research service:
+`research_workflows/market-daily` is an example workflow. Its `AGENTS.md` contains only the market-report task context, while its agents and skill use the pinned, community-maintained, non-official `yfinance-market-mcp` package for structured Yahoo Finance data and Tavily MCP for independent web evidence. Generate and statically validate the complete configuration without calling a model:
 
 ```bash
-DRY_RUN=1 scripts/opencode_stability_market_report.sh single
-DRY_RUN=1 scripts/opencode_stability_market_report.sh stress
+scripts/research_workflow.sh validate research_workflows/market-daily \
+  --input '{"query":"生成完整市场日报","target_date":"2026-07-10","timezone":"Asia/Singapore"}'
 ```
 
-Run one report, or start one persistent `opencode serve` and attach three simultaneous sessions that submit the same complete market-report question:
+Run one report, or use the same generic runner to attach three simultaneous sessions:
 
 ```bash
-scripts/opencode_stability_market_report.sh single
-scripts/opencode_stability_market_report.sh stress
+scripts/research_workflow.sh run research_workflows/market-daily \
+  --input '{"query":"生成完整市场日报","target_date":"2026-07-10","timezone":"Asia/Singapore"}'
+
+scripts/research_workflow.sh load-test research_workflows/market-daily \
+  --input '{"query":"生成完整市场日报","target_date":"2026-07-10","timezone":"Asia/Singapore"}' \
+  --replicas 3
 ```
 
-The live default uses `deepseek/deepseek-v4-pro` and requires `DEEPSEEK_API_KEY`. Override `MODEL`, `TARGET_DATE`, `REPORT_TIMEZONE`, or `HARNESS_TIMEOUT_SECONDS` as needed. `stress` passes only when all three reports complete their deterministic and LLM quality gates, all three durable worker intervals overlap, job start times span at most 10 seconds, `sum(job elapsed) / job wall time >= 2.0`, every report's three initial Codex processes genuinely overlap, the machine-wide Codex peak stays at or below nine, all 14 common index/commodity table values are comparable across the three reports without unexplained numeric/unit conflicts, and no tracked process survives cleanup.
-
-If a completed run needs to be evaluated after an acceptance-policy bug is fixed, revalidate it without changing the original reports or manifest. The output records the source manifest SHA-256 and every report SHA-256. Structured raw-evidence conflicts remain visible, while final report-table conflicts govern cross-report acceptance:
-
-```sh
-uv run python scripts/opencode_market_report_harness.py \
-  --revalidate-manifest outputs/stability/<run-id>/manifest.json \
-  --revalidation-output outputs/stability/<run-id>/revalidation.json
-```
+The live default uses `deepseek/deepseek-v4-pro` and requires `DEEPSEEK_API_KEY` plus `TAVILY_API_KEY`. Market coverage is checked by the workflow-owned report validator, not by a special harness or prescribed MCP call sequence. See [the market workflow guide](docs/OPENCODE_MCP_WORKFLOW.md).
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.

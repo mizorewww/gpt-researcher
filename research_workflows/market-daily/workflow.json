@@ -2,14 +2,14 @@
   "$schema": "../workflow.schema.json",
   "schemaVersion": 1,
   "name": "market-daily",
-  "description": "Chinese daily market report example using GPT Researcher MCP and a dedicated evidence audit agent.",
+  "description": "Agent-driven Chinese daily market report using structured Yahoo Finance data and independent web evidence.",
   "entryCommand": "run",
   "entryAgent": "market-coordinator",
   "requires": {
     "opencode": ">=1.17.15",
     "env": ["DEEPSEEK_API_KEY", "TAVILY_API_KEY"],
     "skills": ["market-daily-method"],
-    "mcp": ["gpt-researcher-codex-long"]
+    "mcp": ["yfinance", "tavily"]
   },
   "execution": {
     "defaultReplicas": 1,
@@ -21,11 +21,25 @@
     "allowedToolPatterns": [
       "skill",
       "task",
-      "gpt-researcher-codex-long_*"
+      "yfinance_*",
+      "tavily_*"
     ],
-    "allowedAgents": ["market-coordinator", "market-auditor"],
+    "toolCallBudgets": {
+      "skill": 12,
+      "task": 12,
+      "yfinance_*": 180,
+      "tavily_*": 40
+    },
+    "allowedAgents": [
+      "market-coordinator",
+      "market-data-researcher",
+      "market-context-researcher",
+      "market-auditor"
+    ],
     "agentToolPatterns": {
-      "market-coordinator": ["skill", "task", "gpt-researcher-codex-long_*"],
+      "market-coordinator": ["skill", "task", "yfinance_*", "tavily_*"],
+      "market-data-researcher": ["skill", "yfinance_*"],
+      "market-context-researcher": ["skill", "tavily_*"],
       "market-auditor": ["skill"]
     },
     "allowCommandShell": false
@@ -37,8 +51,8 @@
   },
   "validators": [
     {
-      "name": "market-protocol",
-      "command": ["{python}", "validators/market_protocol.py"],
+      "name": "market-report-quality",
+      "command": ["{python}", "validators/market_report.py"],
       "timeoutSeconds": 60
     }
   ]

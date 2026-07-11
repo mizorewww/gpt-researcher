@@ -2,7 +2,7 @@
 
 This directory is a self-contained OpenCode research workflow.
 
-- `AGENTS.md`: always-on orchestration and evidence invariants.
+- `AGENTS.md`: domain task context, coverage, and completion requirements.
 - `.opencode/agents/`: primary and subagent roles, models, and permissions.
 - `.opencode/skills/`: domain methods loaded on demand.
 - `.opencode/commands/run.md`: native OpenCode entry prompt.

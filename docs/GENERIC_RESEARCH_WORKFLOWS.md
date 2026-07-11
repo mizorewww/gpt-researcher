@@ -1,13 +1,15 @@
 # 通用 OpenCode 调查工作流
 
-`gptr-workflow` 把每一种调查需求表示为一个独立的 OpenCode 项目目录。Runner 不理解金融、法律、论文或竞品分析；它只负责不可变快照、隔离配置、并发 session、超时、进程树清理、工具权限审计、输入/结果 Schema、日志和 manifest。
+`gptr-workflow` 把每一种调查需求表示为一个独立的 OpenCode 项目目录。Runner 不理解金融、法律、论文或竞品分析；它只负责 process/session 调度、不可变快照、隔离配置、并发、超时、进程树清理、工具权限与预算审计、输入/结果 Schema、日志和 manifest。
+
+这套 OpenCode workflow 与直接调用 GPT Researcher MCP API 是两条独立路径。`profile_info`、`research_report_start`、`research_reports_status` 和 `research_report_result` 是选择该 backend 时可用的 API，不是通用 workflow 的固定协议，也不应写进通用 `AGENTS.md`。只有 workflow 主动配置并选择 GPT Researcher MCP 时，相关工具才属于它的能力面。
 
 调查方法由目录中的 OpenCode 原生文件决定：
 
 ```text
 research_workflows/<name>/
 ├── workflow.json                 # 仅 runner 元数据、容量、安全边界和 Schema 路径
-├── AGENTS.md                     # 所有调查都必须遵守的调度与证据规则
+├── AGENTS.md                     # 领域任务上下文、覆盖范围和完成条件
 ├── opencode.jsonc                # 模型、instructions 和任意 local/remote MCP
 ├── instructions/                 # 必须始终加载的证据/输出约束
 ├── schemas/                      # 输入与最终 marker JSON Schema
@@ -17,7 +19,7 @@ research_workflows/<name>/
     └── skills/*/SKILL.md         # 按需加载的领域调查方法
 ```
 
-市场日报只是 [`research_workflows/market-daily`](../research_workflows/market-daily/) 里的一个示例。旧的市场 harness 继续用于严格容量与数值一致性验收，不再作为通用入口。
+市场日报只是 [`research_workflows/market-daily`](../research_workflows/market-daily/) 里的一个示例。它与其他 workflow 使用同一个 runner；市场覆盖规则只存在于该目录的任务上下文、skill、Schema 和 validator 中。
 
 ## 一分钟创建
 
@@ -53,19 +55,18 @@ scripts/research_workflow.sh init asia-market-monitor \
 
 ### `AGENTS.md`
 
-这里只放始终生效的规则，例如：
+这里只放该类任务始终成立的领域上下文，例如：
 
-- 如何动态拆成 2–N 个互不重叠的 work item；
-- 哪些任务可以同一轮并行发给 subagent 或 MCP；
-- 时间、单位、来源和矛盾如何处理；
-- 覆盖不足时允许几轮缺口补查；
-- 什么条件必须 fail closed。
+- 调查对象、术语和边界；
+- 必须覆盖的市场、地区、实体或证据类型；
+- 日期、单位、来源质量和矛盾处理要求；
+- 报告必须包含的内容与 fail-closed 完成条件。
 
-不要把某一次调查问题写进 `AGENTS.md`。问题通过 `--input` 或 `--input-json` 传入。
+不要把某一次调查问题、MCP 工具名、固定工具调用顺序、轮询协议、并发数、重试次数或进程控制写进 `AGENTS.md`。具体问题通过 `--input` 或 `--input-json` 传入；任务拆解和工具选择属于 agents/skills，session 容量、超时、工具预算、权限与清理属于通用 runner。
 
 ### `.opencode/agents/*.md`
 
-`entryAgent` 必须是 `mode: primary`。专业调查员和审计员用 `mode: subagent`。模型属于 agent 配置，不属于 `workflow.json`：
+`entryAgent` 必须是 `mode: primary`。专业调查员和审计员用 `mode: subagent`。任务相关的拆解、委派和工具选择写在 agents/skills 中；模型属于 agent 配置，不属于 `workflow.json`：
 
 ```markdown
 ---
@@ -131,12 +132,31 @@ description: Use for clinical evidence, trials, systematic reviews, endpoints, s
 
 - `workflow.json` 的 `requires.env`；
 - `security.allowedToolPatterns`，例如 `company-data_*`；
+- 可选的 `security.toolCallBudgets`，为同一个已允许 pattern 声明每副本预算基数；
 - `security.agentToolPatterns`，为每个 agent 设置不超过全局白名单的运行时上限；
 - 需要调用它的 agent 的 `permission`。
 
 Runner 会通过最高优先级的运行时安全 overlay，再次对 primary 和允许的 subagent 注入 deny-by-default 工具白名单。OpenCode project config 不能在运行时绕过这一层。
 
 只有 `requires.env` 声明的业务变量会从宿主环境或项目 `.env` 传给 OpenCode；`OPENCODE_*`、`PYTHONPATH`、动态链接器变量等控制变量禁止继承。这样新增 MCP 时需要显式声明凭证，同时不会把整个宿主环境交给任意 local MCP。
+
+### `workflow.json` 工具预算
+
+`security.toolCallBudgets` 是通用 runner 的硬限制，不是给模型看的提示词。键必须同时出现在 `security.allowedToolPatterns` 中，值是每个 root session/replica 的预算基数：
+
+```json
+{
+  "security": {
+    "allowedToolPatterns": ["skill", "task", "company-data_*"],
+    "toolCallBudgets": {
+      "task": 12,
+      "company-data_*": 80
+    }
+  }
+}
+```
+
+Runner 从隔离 OpenCode permission log 统计 primary 与所有 nested agent 的真实调用。一次运行的有效聚合上限是 `configured_per_replica × replicas`；例如 `company-data_*: 80` 在三个副本时允许整个 run 合计最多 240 次匹配调用。它是按副本数扩展的聚合上限，并不保证每个副本各自恰好只能使用 80 次。Runner 运行中持续检查总量，超限后终止进程树并将运行标为失败；只要配置了预算，permission audit 不可用也会 fail closed。Manifest 的 `security.tool_call_budgets_per_replica`、`security.effective_tool_call_budgets` 和 `tool_audit` 会记录基数、有效上限、实际计数与违规项。
 
 ### `.opencode/commands/run.md`
 
@@ -205,7 +225,7 @@ scripts/research_workflow.sh run research_workflows/company-intelligence \
   --input '调查公司 C'
 ```
 
-多副本共用一个该 workflow 专属的持久 `opencode serve`，每个 `run --attach` 创建独立 session。副本数量由 `workflow.json` 的 `maxReplicas` 限制。单 session 内部的 subagent/MCP fan-out 由 `AGENTS.md` 与 agent 配置决定；MCP 后端仍必须实现自己的机器级配额、队列、超时和取消，不能依赖 prompt 限流。
+多副本共用一个该 workflow 专属的持久 `opencode serve`，每个 `run --attach` 创建独立 session。副本数量由 `workflow.json` 的 `maxReplicas` 限制。任务相关的 subagent/MCP fan-out 由 agents/skills 决定；通用 runner 强制 session 数量、总 deadline、工具权限、聚合工具预算和进程树清理。MCP 后端仍必须实现自己的机器级并发配额、队列、超时和取消，不能依赖 prompt 或客户端工具计数代替服务端容量保护。
 
 ## 安全、隔离与审计
 
@@ -217,10 +237,11 @@ scripts/research_workflow.sh run research_workflows/company-intelligence \
 4. 使用隔离 XDG，禁用用户目录的外部 skills、外部 plugins 和宿主 OpenCode 控制配置；
 5. 预检 resolved config、entry primary agent、allowed agents、skills 和 MCP；
 6. 并行启动 session，并在超时/中断时 TERM 后 KILL 进程组；
-7. 审计 JSONL 中的工具名，任何不在白名单的调用都会令运行失败；
-8. 提取最终 marker JSON，并用 `schemas/result.schema.json` 校验；
-9. 用每个 session 的真实开始/结束区间计算并发峰值，清理检测到的孤儿进程；
-10. 保存响应、日志、进程、hash、错误、validator 结果和孤儿进程检查。
+7. 审计整个 agent tree 的工具名，任何不在白名单的调用都会令运行失败；
+8. 按每副本预算基数计算本次运行的聚合工具上限，实时超限或审计不可用时 fail closed；
+9. 提取最终 marker JSON，并用 `schemas/result.schema.json` 校验；
+10. 用每个 session 的真实开始/结束区间计算并发峰值，清理检测到的孤儿进程；
+11. 保存响应、日志、进程、hash、错误、工具计数与预算、validator 结果和孤儿进程检查。
 
 默认产物：
 
@@ -235,7 +256,7 @@ ${TMPDIR}/gptr-opencode-workflows/<project-hash>/<artifact-root-hash>/<name>/<ru
 
 Workflow 目录本身属于可信可执行配置：local MCP 和可选 validator 都可以启动本地程序。不要运行来源不可信的 workflow；权限白名单保护 agent 工具面，不是操作系统级恶意代码沙箱。
 
-GPT Researcher report worker 通过跨 MCP 进程共享的文件锁保持整机最多 3 个，Codex 通过另一组共享槽位保持整机最多 9 个。因此同时启动多个 `gptr-workflow` 进程也不会把普通 retriever、scraper、writer 或 Codex 上限成倍放大。所有 checkout 和已安装 CLI 默认共用 `~/.gpt-researcher/slots`；如需改位置，设置 `GPT_RESEARCHER_GLOBAL_SLOT_ROOT`，并确保本机所有 coordinator 使用同一个可写目录。
+当某个 workflow 选择 GPT Researcher MCP 时，report worker 通过跨进程共享的文件锁保持最多 3 个，Codex 通过另一组共享槽位保持最多 9 个。所有 checkout 和已安装 CLI 默认共用 `~/.gpt-researcher/slots`；如需改位置，设置 `GPT_RESEARCHER_GLOBAL_SLOT_ROOT`，并确保本机所有 coordinator 使用同一个可写目录。只使用其他 MCP 的 workflow 不会被错误套用这组领域无关的容量说明，其上限由各 MCP 和 `maxReplicas` 决定。
 
 快速检查：
 
@@ -246,7 +267,7 @@ jq '{status, workflow, replicas, session_execution_peak, sessions, orphan_pids}'
 
 ## 模型与余额
 
-Runner 不实现自动换模型或余额 fallback。当前模板、市场示例以及现有 OpenCode harness 的 coordinator 都保持 `deepseek/deepseek-v4-pro`。如果 DeepSeek 返回 `402 Insufficient Balance`，运行会失败并保留日志；充值后用新的 `run_id` 重跑即可。
+Runner 不实现自动换模型或余额 fallback。当前模板与市场示例都保持 `deepseek/deepseek-v4-pro`。如果 DeepSeek 返回 `402 Insufficient Balance`，运行会失败并保留日志；充值后用新的 `run_id` 重跑即可。
 
 Codex 检索子进程的 `gpt-5.5` 是 GPT Researcher MCP 内部 retriever 配置，不是 DeepSeek 的替代或 fallback。
 
@@ -260,10 +281,12 @@ scripts/research_workflow.sh run research_workflows/market-daily \
   --input '{"query":"调研指定交易日的美日韩港市场、宏观、大宗商品和重要股票，生成严肃日报。","target_date":"2026-07-10","timezone":"Asia/Singapore"}'
 ```
 
-若要验证严格的 10 指数、4 商品、16 股票、25 来源以及三报告共同数值一致性，继续使用市场专用 acceptance harness；那是领域 validator，不是通用调度器：
+市场示例通过自己的 agents/skill 组合固定版本的社区、非官方 `yfinance-market-mcp` 与 Tavily MCP；`AGENTS.md` 只描述日报任务上下文。质量规则位于 workflow validator，执行仍是同一个通用 runner。三副本满载验证也直接使用通用入口：
 
 ```bash
-TARGET_DATE=2026-07-10 scripts/opencode_stability_market_report.sh stress
+scripts/research_workflow.sh load-test research_workflows/market-daily \
+  --input '{"query":"调研指定交易日的美日韩港市场、宏观、大宗商品和重要股票，生成严肃日报。","target_date":"2026-07-10","timezone":"Asia/Singapore"}' \
+  --replicas 3
 ```
 
 ## OpenCode 原生机制参考

@@ -3,7 +3,8 @@ description: Run this workflow's evidence-first research process from canonical 
 agent: research-coordinator
 ---
 
-Execute the complete research workflow defined by this project.
+Execute this OpenCode project's task using its task context, configured agent
+roles, available skills, evidence capabilities, and output contract.
 
 Canonical input JSON:
 
@@ -11,4 +12,5 @@ Canonical input JSON:
 $ARGUMENTS
 ```
 
-Validate the intent against `schemas/input.schema.json`, load the relevant skills, use the configured MCP servers, parallelize independent work, synthesize the deliverable, and ask the evidence auditor to perform the final quality check. Follow the output contract exactly.
+Preserve every explicit requirement in the canonical input and return the
+complete result under the configured output contract.

@@ -2,39 +2,45 @@
   "$schema": "https://opencode.ai/config.json",
   "model": "deepseek/deepseek-v4-pro",
   "default_agent": "market-coordinator",
-  "instructions": ["instructions/output-contract.md"],
+  "instructions": [
+    "instructions/evidence-policy.md",
+    "instructions/output-contract.md"
+  ],
   "permission": {
     "*": "deny",
     "skill": "allow",
     "task": "allow",
-    "gpt-researcher-codex-long_*": "allow"
+    "yfinance_*": "allow",
+    "tavily_*": "allow"
   },
   "mcp": {
-    "gpt-researcher-codex-long": {
+    "yfinance": {
       "type": "local",
       "command": [
-        "{env:RESEARCH_WORKFLOW_GPTR_BIN}"
+        "uvx",
+        "--from",
+        "yfinance-market-mcp==0.3.3",
+        "yfinance-mcp"
       ],
       "environment": {
-        "GPT_RESEARCHER_PROFILE_DIR": "{env:RESEARCH_WORKFLOW_PROJECT_ROOT}",
-        "MCP_RESEARCH_JOBS_DIR": "{env:RESEARCH_WORKFLOW_JOBS_DIR}",
-        "MCP_RESEARCH_GLOBAL_SLOT_DIR": "{env:RESEARCH_WORKFLOW_GLOBAL_JOB_SLOT_DIR}",
-        "MCP_RESEARCH_GLOBAL_CONCURRENCY": "3",
-        "CODEX_SEARCH_GLOBAL_SLOT_DIR": "{env:RESEARCH_WORKFLOW_CODEX_SLOT_DIR}",
-        "MCP_RESEARCH_MAX_CONCURRENT_JOBS": "3",
-        "MCP_RESEARCH_MAX_QUEUED_JOBS": "9",
-        "MCP_RESEARCH_JOB_TIMEOUT": "2700",
-        "MCP_RESEARCH_MIN_HTTP_SOURCES": "25",
-        "RETRIEVER": "tavily,codex",
-        "LANGUAGE": "chinese",
-        "CODEX_SEARCH_MODE": "search",
-        "CODEX_SEARCH_MODEL": "gpt-5.5",
-        "CODEX_SEARCH_REASONING_EFFORT": "medium",
-        "CODEX_SEARCH_SERVICE_TIER": "fast",
-        "CODEX_SEARCH_RETRIEVER_CONCURRENCY": "3",
-        "CODEX_SEARCH_GLOBAL_CONCURRENCY": "9"
+        "UV_CACHE_DIR": "{env:RESEARCH_WORKFLOW_UV_CACHE_DIR}"
       },
-      "timeout": 3000000,
+      "timeout": 120000,
+      "enabled": true
+    },
+    "tavily": {
+      "type": "local",
+      "command": [
+        "npx",
+        "-y",
+        "tavily-mcp@0.2.21"
+      ],
+      "environment": {
+        "TAVILY_API_KEY": "{env:TAVILY_API_KEY}",
+        "NPM_CONFIG_CACHE": "{env:RESEARCH_WORKFLOW_NPM_CACHE_DIR}",
+        "DEFAULT_PARAMETERS": "{\"search_depth\":\"advanced\",\"max_results\":6,\"include_raw_content\":false}"
+      },
+      "timeout": 120000,
       "enabled": true
     }
   }

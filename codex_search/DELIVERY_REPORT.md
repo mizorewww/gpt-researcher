@@ -132,17 +132,18 @@ The long-report profile uses `search + medium + fast`, retains up to `12` source
 - Four ordinary retrievers and five scraper workers inside each report worker.
 - A 2700-second job budget, a queue limit of nine, and 72-hour terminal-job retention.
 
-Strict market-daily work also uses keyless, allowlisted Yahoo Chart and HTML-history checks inside the same four ordinary-retriever slots. They produce dated, source-addressable evidence and fail softly per source. Deterministic index, commodity, and stock ledgers are given to the writer only for complete target-date rows: indices require two retrieved URLs; WTI, Brent, gold, and copper freeze the target-date Yahoo continuous-futures value, unit, contract basis, and a distinct corroborating URL; stocks require four rows per market with the required 2+2 selection mix. Draft citations are restricted to retrieved evidence and duplicate full-report stream restarts are repaired with an audit entry before judging. This grounding does not weaken the final fail-closed gate or increase Codex concurrency.
-
 The local MCP entry point is launched from the checkout with `uv run --directory ... gpt-researcher`. Long clients use `research_report_start`, batch long-poll with `research_reports_status`, fetch terminal data with `research_report_result`, and can terminate the worker tree with `research_report_cancel`.
 
-`scripts/opencode_stability_market_report.sh` provides two acceptance paths. `single` submits one report. `stress` starts one persistent `opencode serve` and launches three simultaneous `opencode run --attach` sessions with the same market-daily question. Both modes use a fresh XDG/job directory, JSONL logs, an atomic run manifest, a hard timeout, current-run-only artifact validation, and a residual-process check. Stress acceptance also requires three overlapping durable workers, three overlapping initial Codex calls per report, a global Codex peak no greater than nine, complete deterministic market coverage, and 14 common index/commodity values that can be parsed and compared across all three final reports without numeric or unit conflicts. Validate the complete setup without external calls using:
-
-The repeatable operator workflow, including quick commands, the MCP call protocol, artifact inspection, read-only revalidation, and failure triage, is documented in [`docs/OPENCODE_MCP_WORKFLOW.md`](../docs/OPENCODE_MCP_WORKFLOW.md). Run `scripts/opencode_stability_market_report.sh --help` for the short command reference.
+OpenCode workflows use the independent, domain-neutral `gptr-workflow` runner.
+Each workflow owns its task context, agents, skills, MCP configuration, schemas,
+and validators; the runner owns isolation, concurrent sessions, tool budgets,
+audit, timeout, and process cleanup. Validate or load-test any workflow with:
 
 ```sh
-DRY_RUN=1 scripts/opencode_stability_market_report.sh single
-DRY_RUN=1 scripts/opencode_stability_market_report.sh stress
+scripts/research_workflow.sh validate research_workflows/<name> --input 'complete request'
+scripts/research_workflow.sh load-test research_workflows/<name> --input 'complete request' --replicas 3
 ```
 
-The Python harness also supports read-only revalidation of an immutable prior run. It hashes the source manifest and all reports, preserves structured raw-evidence conflicts for audit, and recomputes acceptance from the final 14-value table comparison without rewriting the source artifacts.
+See [`docs/GENERIC_RESEARCH_WORKFLOWS.md`](../docs/GENERIC_RESEARCH_WORKFLOWS.md)
+for the reusable workflow contract and [`docs/OPENCODE_MCP_WORKFLOW.md`](../docs/OPENCODE_MCP_WORKFLOW.md)
+for the market workflow as one configured example.

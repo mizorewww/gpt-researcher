@@ -6,24 +6,43 @@
     "status",
     "summary",
     "artifacts",
-    "source_count",
-    "job_id",
     "quality_gate_passed",
-    "work_item_count",
-    "active_codex_peak",
     "target_date",
-    "timezone"
+    "timezone",
+    "markets",
+    "stock_count"
   ],
   "properties": {
     "status": {"enum": ["completed", "failed"]},
     "summary": {"type": "string", "minLength": 1},
-    "artifacts": {"type": "array", "items": {"type": "string"}},
-    "source_count": {"type": "integer", "minimum": 0},
-    "job_id": {"type": "string", "minLength": 1},
-    "quality_gate_passed": {"const": true},
-    "work_item_count": {"const": 3},
-    "active_codex_peak": {"const": 3},
+    "artifacts": {"type": "array", "maxItems": 0},
+    "quality_gate_passed": {"type": "boolean"},
     "target_date": {"type": "string", "format": "date"},
-    "timezone": {"type": "string", "minLength": 1}
-  }
+    "timezone": {"type": "string", "minLength": 1},
+    "markets": {
+      "type": "array",
+      "uniqueItems": true,
+      "allOf": [
+        {"contains": {"const": "US"}},
+        {"contains": {"const": "Japan"}},
+        {"contains": {"const": "Korea"}},
+        {"contains": {"const": "Hong Kong"}}
+      ]
+    },
+    "stock_count": {"type": "integer", "minimum": 0}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"status": {"const": "completed"}}},
+      "then": {
+        "properties": {
+          "quality_gate_passed": {"const": true},
+          "stock_count": {"minimum": 16}
+        }
+      },
+      "else": {
+        "properties": {"quality_gate_passed": {"const": false}}
+      }
+    }
+  ]
 }
