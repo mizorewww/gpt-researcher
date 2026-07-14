@@ -230,7 +230,7 @@ Each job writes a UUID-scoped, atomic audit directory. Coverage and unique HTTP 
 
 ### OpenCode orchestration
 
-OpenCode can use GPT Researcher as an ordinary MCP tool alongside other MCPs. There is no project-specific Python runner, workflow schema, or validator. The example in [`opencode/market-research-smoke`](opencode/market-research-smoke/) combines this checkout's GPT Researcher MCP with a Yahoo Finance MCP; its market requirements exist only in `AGENTS.md`, while the agents and skill remain generic.
+OpenCode can use GPT Researcher as an ordinary MCP tool alongside other MCPs. There is no project-specific Python runner, workflow schema, or validator. The example in [`opencode/market-research-smoke`](opencode/market-research-smoke/) combines this checkout's GPT Researcher MCP with a Yahoo Finance MCP. Its `AGENTS.md` owns both the market requirements and the workflow-specific tool-call contract; the agents and skill only execute that contract and remain tool-agnostic.
 
 ```bash
 set -a; source .env; set +a
@@ -241,7 +241,7 @@ opencode run --pure \
   '目标日期为 2026-07-10，时区 Asia/Singapore。生成完整市场日报。'
 ```
 
-To create a different investigation, copy that directory and replace `AGENTS.md`; change `opencode.jsonc` only when the MCP set changes. See the [OpenCode MCP guide](docs/OPENCODE_MCP_WORKFLOW.md).
+To create a different investigation, copy that directory and replace `AGENTS.md`, including the new workflow's tool-call requirements; change `opencode.jsonc` only when the available MCP set changes. See the [OpenCode MCP guide](docs/OPENCODE_MCP_WORKFLOW.md).
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.

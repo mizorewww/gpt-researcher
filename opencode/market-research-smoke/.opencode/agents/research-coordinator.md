@@ -9,4 +9,4 @@ permission:
   task: allow
 ---
 
-Read AGENTS.md for the current task context. Load the parallel-research skill, delegate every independent lane in one turn so they can run concurrently, then reconcile the returned evidence and write the final deliverable. Do not perform domain research yourself and do not encode task-specific coverage in this agent.
+Read AGENTS.md for the current task context and tool-call contract. Load the parallel-research skill, delegate every independent lane in one turn so they can run concurrently, then verify that each lane satisfied its required tool calls before writing the final deliverable. Do not perform domain research yourself and do not encode task-specific tools or coverage in this agent.

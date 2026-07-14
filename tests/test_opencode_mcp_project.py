@@ -32,9 +32,22 @@ def test_task_context_is_separate_from_generic_orchestration():
 
     assert "美国" in task_context
     assert "大宗商品" in task_context
-    for protocol_term in ("mcp", "research_report", "profile_info", "yfinance"):
-        assert protocol_term not in task_context
-    for market_term in ("股票", "市场日报", "yfinance", "nasdaq", "kospi"):
-        assert market_term not in coordinator
-        assert market_term not in worker
-        assert market_term not in skill
+    for required_tool_term in (
+        "gpt-researcher-codex-long",
+        "research_report",
+        "yfinance",
+        "必须",
+    ):
+        assert required_tool_term in task_context
+    generic_orchestration = "\n".join((coordinator, worker, skill))
+    for workflow_specific_term in (
+        "gpt-researcher-codex-long",
+        "research_report",
+        "yfinance",
+        "股票",
+        "市场日报",
+        "nasdaq",
+        "kospi",
+        "expensive high-level",
+    ):
+        assert workflow_specific_term not in generic_orchestration
