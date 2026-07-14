@@ -105,13 +105,17 @@ uv run opencode-workflow show company-research
 uv run opencode-workflow open company-research
 ```
 
-或者启动并打开 OpenCode Web UI：
+`open` 每次停留在一个新的对话，并把工作流的入口命令预填到输入框，不会自动发送。默认要求 `.opencode/commands/` 中恰好有一个入口；例如市场案例会预填 `/research `，你补充目标日期、时区等本次输入后按 Enter 即可。
+
+如果一个工作流有多个命令，显式选择要预填的入口：
 
 ```bash
-uv run opencode-workflow open company-research --web
+uv run opencode-workflow open company-research --command research
 ```
 
-默认使用 OpenCode `--pure`，避免外部 plugin 改变行为；需要加载外部 plugin 时添加 `--with-plugins`。若工作流放在其他目录，可设置 `OPENCODE_WORKFLOWS_DIR`，或在任意命令前传入 `--root /path/to/workflows`。
+CLI 只根据当前工作流自己的 command 文件生成 `/命令名 `，不读取或硬编码任何市场、GPT Researcher、Yahoo Finance 调用规则。实际任务与工具契约仍由 `AGENTS.md` 和该 command 文件定义。
+
+只支持 TUI，不再提供 Web UI 启动选项。默认使用 OpenCode `--pure`，避免外部 plugin 改变行为；需要加载外部 plugin 时添加 `--with-plugins`。若工作流放在其他目录，可设置 `OPENCODE_WORKFLOWS_DIR`，或在任意命令前传入 `--root /path/to/workflows`。
 
 若任务不要求三路并发，可在新的 `AGENTS.md` 中指定需要的独立方向数量；通用 skill 会遵循任务要求。不同调查需要不同 MCP 或调用顺序时，也应写入各自的 `AGENTS.md`，不能移动到通用 agent、skill 或 Python harness。
 

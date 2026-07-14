@@ -246,8 +246,7 @@ Create a different investigation from the generic template, inspect it, then ope
 ```bash
 uv run opencode-workflow new company-research
 uv run opencode-workflow show company-research
-uv run opencode-workflow open company-research       # TUI
-uv run opencode-workflow open company-research --web # Web UI
+uv run opencode-workflow open company-research       # 新 TUI 会话并预填入口命令
 ```
 
 Put the task and tool-call contract in `AGENTS.md`, available MCPs in `opencode.jsonc`, and optional custom orchestration in `.opencode/`. See the [OpenCode MCP guide](docs/OPENCODE_MCP_WORKFLOW.md).

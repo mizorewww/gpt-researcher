@@ -7,7 +7,14 @@ import json
 import os
 import re
 import shutil
+import socket
+import subprocess
 import sys
+import threading
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -229,15 +236,89 @@ def workflow_summary(path: Path) -> str:
     return "\n".join(lines)
 
 
-def open_workflow(path: Path, *, web: bool, pure: bool) -> None:
+def workflow_entry_prompt(path: Path, command_name: str | None = None) -> str:
+    commands = _names(path / ".opencode" / "commands", ".md")
+    if command_name:
+        if command_name not in commands:
+            raise WorkflowError(
+                f"workflow command does not exist: {command_name} "
+                f"(available: {', '.join(commands) or 'none'})"
+            )
+        return f"/{command_name} "
+    if len(commands) == 1:
+        return f"/{commands[0]} "
+    if not commands:
+        raise WorkflowError("workflow has no .opencode/commands/*.md entry prompt")
+    raise WorkflowError(
+        "workflow has multiple entry prompts; select one with --command: "
+        + ", ".join(commands)
+    )
+
+
+def _free_local_port() -> int:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+        listener.bind(("127.0.0.1", 0))
+        return int(listener.getsockname()[1])
+
+
+def _prefill_tui(port: int, path: Path, prompt: str) -> None:
+    base_url = f"http://127.0.0.1:{port}"
+    # OpenCode exposes its HTTP listener before the interactive renderer has
+    # finished booting. Do not probe it during that startup window.
+    time.sleep(3)
+    deadline = time.monotonic() + 20
+    while time.monotonic() < deadline:
+        try:
+            with urllib.request.urlopen(f"{base_url}/global/health", timeout=0.5):
+                break
+        except (OSError, urllib.error.URLError):
+            time.sleep(0.1)
+    else:
+        return
+
+    time.sleep(0.5)
+    query = urllib.parse.urlencode({"directory": str(path)})
+    request = urllib.request.Request(
+        f"{base_url}/tui/append-prompt?{query}",
+        data=json.dumps({"text": prompt}).encode("utf-8"),
+        headers={
+            "Content-Type": "application/json",
+            "x-opencode-directory": str(path),
+        },
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=2):
+            pass
+    except (OSError, urllib.error.URLError):
+        return
+
+
+def open_workflow(path: Path, *, pure: bool, command_name: str | None = None) -> None:
     validate_workflow(path)
     if shutil.which("opencode") is None:
         raise WorkflowError("opencode executable was not found on PATH")
+    prompt = workflow_entry_prompt(path, command_name)
+    port = _free_local_port()
     os.chdir(path)
-    command = ["opencode", "web"] if web else ["opencode", "."]
+    command = [
+        "opencode",
+        str(path),
+        "--hostname",
+        "127.0.0.1",
+        "--port",
+        str(port),
+    ]
     if pure:
         command.append("--pure")
-    os.execvp(command[0], command)
+    threading.Thread(
+        target=_prefill_tui,
+        args=(port, path, prompt),
+        daemon=True,
+    ).start()
+    completed = subprocess.run(command, check=False)
+    if completed.returncode:
+        raise WorkflowError(f"opencode exited with status {completed.returncode}")
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -262,10 +343,14 @@ def build_parser() -> argparse.ArgumentParser:
     show = subparsers.add_parser("show", help="Visualize one workflow in the terminal.")
     show.add_argument("name")
 
-    open_parser = subparsers.add_parser("open", help="Open a workflow in OpenCode.")
+    open_parser = subparsers.add_parser(
+        "open", help="Open a fresh workflow conversation in the OpenCode TUI."
+    )
     open_parser.add_argument("name")
     open_parser.add_argument(
-        "--web", action="store_true", help="Open the OpenCode web UI."
+        "--command",
+        dest="entry_command",
+        help="Entry command to prefill (default: the workflow's only command).",
     )
     open_parser.add_argument(
         "--with-plugins",
@@ -293,8 +378,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "open":
             open_workflow(
                 workflow_path(root, args.name),
-                web=args.web,
                 pure=not args.with_plugins,
+                command_name=args.entry_command,
             )
         return 0
     except WorkflowError as exc:

@@ -8,11 +8,12 @@ from gpt_researcher.opencode_cli import (
     BUNDLED_TEMPLATE,
     PROJECT_ROOT,
     WorkflowError,
+    _prefill_tui,
     create_workflow,
     discover_workflows,
     load_config,
     main,
-    open_workflow,
+    workflow_entry_prompt,
     workflow_summary,
     workflows_root,
 )
@@ -82,7 +83,7 @@ def test_show_visualizes_prompt_mcps_and_optional_harness(workflows: Path):
     assert "parallel-research" in summary
 
 
-def test_cli_lists_and_open_execs_opencode_in_workflow_directory(
+def test_cli_lists_and_open_starts_fresh_tui_with_prefilled_entry_command(
     workflows: Path, capsys: pytest.CaptureFixture[str]
 ):
     created = create_workflow(workflows, "policy-research", "_template")
@@ -91,13 +92,44 @@ def test_cli_lists_and_open_execs_opencode_in_workflow_directory(
 
     with (
         patch("gpt_researcher.opencode_cli.shutil.which", return_value="/bin/opencode"),
+        patch("gpt_researcher.opencode_cli._free_local_port", return_value=4567),
         patch("gpt_researcher.opencode_cli.os.chdir") as chdir,
-        patch("gpt_researcher.opencode_cli.os.execvp") as execvp,
+        patch("gpt_researcher.opencode_cli.threading.Thread") as thread,
+        patch("gpt_researcher.opencode_cli.subprocess.run") as run,
     ):
-        open_workflow(created, web=True, pure=True)
+        run.return_value.returncode = 0
+        assert main(["--root", str(workflows), "open", "policy-research"]) == 0
 
     chdir.assert_called_once_with(created)
-    execvp.assert_called_once_with("opencode", ["opencode", "web", "--pure"])
+    thread.assert_called_once_with(
+        target=_prefill_tui,
+        args=(4567, created, "/research "),
+        daemon=True,
+    )
+    thread.return_value.start.assert_called_once_with()
+    run.assert_called_once_with(
+        [
+            "opencode",
+            str(created),
+            "--hostname",
+            "127.0.0.1",
+            "--port",
+            "4567",
+            "--pure",
+        ],
+        check=False,
+    )
+
+
+def test_workflow_entry_prompt_is_generic_and_requires_a_choice(workflows: Path):
+    created = create_workflow(workflows, "policy-research", "_template")
+    assert workflow_entry_prompt(created) == "/research "
+
+    commands = created / ".opencode/commands"
+    (commands / "audit.md").write_text("Audit the request.", encoding="utf-8")
+    with pytest.raises(WorkflowError, match="multiple entry prompts"):
+        workflow_entry_prompt(created)
+    assert workflow_entry_prompt(created, "audit") == "/audit "
 
 
 def test_cli_rejects_path_traversal(workflows: Path):
