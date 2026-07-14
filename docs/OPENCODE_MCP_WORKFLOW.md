@@ -97,6 +97,8 @@ uv run opencode-workflow list
 uv run opencode-workflow show company-research
 ```
 
+不传 `--root` 时，CLI 先检查当前目录的 `./opencode`；若不存在，则自动使用 checkout 或安装包自带的工作流目录。因此从其他目录执行也能看到内置的 `market-research-smoke` 案例。显式设置 `--root` 或 `OPENCODE_WORKFLOWS_DIR` 时始终以显式目录为准。
+
 直接打开该工作流的 OpenCode TUI：
 
 ```bash

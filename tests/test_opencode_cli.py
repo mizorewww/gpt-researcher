@@ -6,6 +6,7 @@ import pytest
 
 from gpt_researcher.opencode_cli import (
     BUNDLED_TEMPLATE,
+    PROJECT_ROOT,
     WorkflowError,
     create_workflow,
     discover_workflows,
@@ -13,6 +14,7 @@ from gpt_researcher.opencode_cli import (
     main,
     open_workflow,
     workflow_summary,
+    workflows_root,
 )
 
 
@@ -43,6 +45,17 @@ def test_default_template_works_for_an_empty_custom_root(tmp_path: Path):
 
     assert created == custom_root / "new-topic"
     assert (created / "AGENTS.md").is_file()
+
+
+def test_default_root_falls_back_to_bundled_workflows_outside_checkout(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.chdir(tmp_path)
+
+    root = workflows_root()
+
+    assert root == (PROJECT_ROOT / "opencode").resolve()
+    assert "market-research-smoke" in {path.name for path in discover_workflows(root)}
 
 
 def test_show_visualizes_prompt_mcps_and_optional_harness(workflows: Path):

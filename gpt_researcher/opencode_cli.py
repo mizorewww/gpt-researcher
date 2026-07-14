@@ -77,7 +77,15 @@ def load_config(path: Path) -> dict[str, Any]:
 
 def workflows_root(value: str | Path | None = None) -> Path:
     configured = value or os.getenv("OPENCODE_WORKFLOWS_DIR")
-    return Path(configured or Path.cwd() / "opencode").expanduser().resolve()
+    if configured:
+        return Path(configured).expanduser().resolve()
+    local = (Path.cwd() / "opencode").resolve()
+    if local.is_dir():
+        return local
+    bundled = (PROJECT_ROOT / "opencode").resolve()
+    if bundled.is_dir():
+        return bundled
+    return local
 
 
 def workflow_path(root: Path, name: str) -> Path:
