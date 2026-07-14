@@ -11,6 +11,7 @@ def test_opencode_project_is_native_and_has_only_tool_mcps():
 
     assert set(config["mcp"]) == {"gpt-researcher-codex-long", "yfinance"}
     assert config["model"] == "deepseek/deepseek-v4-pro"
+    assert config["permission"]["bash"] == "allow"
     assert not (
         PROJECT_ROOT / "gpt_researcher" / "opencode_workflow" / "runner.py"
     ).exists()
@@ -32,6 +33,7 @@ def test_task_context_is_separate_from_generic_orchestration():
 
     assert "美国" in task_context
     assert "大宗商品" in task_context
+    assert "不要要求用户补充日期或时区" in task_context
     for required_tool_term in (
         "gpt-researcher-codex-long",
         "research_report",

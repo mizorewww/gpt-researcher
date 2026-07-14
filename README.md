@@ -238,7 +238,7 @@ opencode run --pure \
   --dir "$PWD/opencode/market-research-smoke" \
   --command research \
   --agent research-coordinator \
-  '目标日期为 2026-07-10，时区 Asia/Singapore。生成完整市场日报。'
+  '生成昨天的完整市场日报。'
 ```
 
 Create a different investigation from the generic template, inspect it, then open it directly in the OpenCode UI:

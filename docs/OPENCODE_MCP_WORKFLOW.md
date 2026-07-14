@@ -52,7 +52,7 @@ opencode mcp list --pure
 opencode run --pure \
   --command research \
   --agent research-coordinator \
-  '目标日期为 2026-07-10，时区 Asia/Singapore。生成完整市场日报。'
+  '生成昨天的完整市场日报。'
 ```
 
 协调员读取 `AGENTS.md`，在同一个 turn 中发出三个独立 worker 任务，并把各方向对应的工具调用要求完整传给 worker。本示例明确要求每个方向调用 GPT Researcher，并调用 Yahoo Finance 核验相应结构化行情；未完成必需调用的方向不能被当作成功结果。最终结果由协调员汇总。
@@ -64,7 +64,7 @@ opencode run --pure \
   --dir "$PWD/opencode/market-research-smoke" \
   --command research \
   --agent research-coordinator \
-  '目标日期为 2026-07-10，时区 Asia/Singapore。生成完整市场日报。'
+  '生成昨天的完整市场日报。'
 ```
 
 ## 快速创建另一种调查任务
@@ -105,7 +105,7 @@ uv run opencode-workflow show company-research
 uv run opencode-workflow open company-research
 ```
 
-`open` 每次停留在一个新的对话，并把工作流的入口命令预填到输入框，不会自动发送。默认要求 `.opencode/commands/` 中恰好有一个入口；例如市场案例会预填 `/research `，你补充目标日期、时区等本次输入后按 Enter 即可。
+`open` 每次停留在一个新的对话，并把工作流的入口命令预填到输入框，不会自动发送。默认要求 `.opencode/commands/` 中恰好有一个入口；例如市场案例会预填 `/research `，直接按 Enter 即可。该工作流会用 shell 读取本机日期和时区，将“昨天”解析并冻结后再启动三条调查，不要求人工填写这些运行时信息。
 
 如果一个工作流有多个命令，显式选择要预填的入口：
 

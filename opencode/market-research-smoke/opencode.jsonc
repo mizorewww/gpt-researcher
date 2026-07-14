@@ -4,6 +4,7 @@
   "default_agent": "research-coordinator",
   "permission": {
     "*": "deny",
+    "bash": "allow",
     "skill": "allow",
     "task": "allow",
     "gpt-researcher-codex-long_*": "allow",
