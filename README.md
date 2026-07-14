@@ -230,15 +230,13 @@ Each job writes a UUID-scoped, atomic audit directory. Coverage and unique HTTP 
 
 ### OpenCode orchestration
 
-OpenCode can use GPT Researcher as an ordinary MCP tool alongside other MCPs. There is no project-specific Python runner, workflow schema, or validator. The example in [`opencode/market-research-smoke`](opencode/market-research-smoke/) combines this checkout's GPT Researcher MCP with a Yahoo Finance MCP. Its `AGENTS.md` owns both the market requirements and the workflow-specific tool-call contract; the agents and skill only execute that contract and remain tool-agnostic.
+OpenCode can use GPT Researcher as an ordinary MCP tool alongside time and Yahoo Finance. There is no project-specific Python runner, workflow schema, or validator. In [`opencode/market-research-smoke`](opencode/market-research-smoke/), `AGENTS.md` contains general investment-research guidance, `opencode.jsonc` exposes the MCPs, and `.opencode/commands/research.md` stores the concrete market question.
 
 ```bash
 set -a; source .env; set +a
 opencode run --pure \
   --dir "$PWD/opencode/market-research-smoke" \
-  --command research \
-  --agent research-coordinator \
-  '生成昨天的完整市场日报。'
+  --command research
 ```
 
 Create a different investigation from the generic template, inspect it, then open it directly in the OpenCode UI:
@@ -246,10 +244,10 @@ Create a different investigation from the generic template, inspect it, then ope
 ```bash
 uv run opencode-workflow new company-research
 uv run opencode-workflow show company-research
-uv run opencode-workflow open company-research       # 新 TUI 会话并预填入口命令
+uv run opencode-workflow open company-research       # 新 TUI 会话并预填保存的完整问题
 ```
 
-Put the task and tool-call contract in `AGENTS.md`, available MCPs in `opencode.jsonc`, and optional custom orchestration in `.opencode/`. See the [OpenCode MCP guide](docs/OPENCODE_MCP_WORKFLOW.md).
+Put reusable research guidance in `AGENTS.md`, available MCPs in `opencode.jsonc`, and the question to prefill in `.opencode/commands/research.md`. Add custom agents or skills only when a workflow actually needs them. See the [OpenCode MCP guide](docs/OPENCODE_MCP_WORKFLOW.md).
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.

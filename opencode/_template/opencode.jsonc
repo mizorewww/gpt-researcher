@@ -1,11 +1,8 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "deepseek/deepseek-v4-pro",
-  "default_agent": "research-coordinator",
   "permission": {
-    "*": "deny",
-    "skill": "allow",
-    "task": "allow"
+    "*": "allow"
   },
   "mcp": {
   }

@@ -1,4 +1,4 @@
-"""Small scaffold and launcher for native OpenCode research projects."""
+"""Scaffold OpenCode workflows and open their saved prompts in the TUI."""
 
 from __future__ import annotations
 
@@ -244,15 +244,28 @@ def workflow_entry_prompt(path: Path, command_name: str | None = None) -> str:
                 f"workflow command does not exist: {command_name} "
                 f"(available: {', '.join(commands) or 'none'})"
             )
-        return f"/{command_name} "
-    if len(commands) == 1:
-        return f"/{commands[0]} "
-    if not commands:
+        selected = command_name
+    elif len(commands) == 1:
+        selected = commands[0]
+    elif not commands:
         raise WorkflowError("workflow has no .opencode/commands/*.md entry prompt")
-    raise WorkflowError(
-        "workflow has multiple entry prompts; select one with --command: "
-        + ", ".join(commands)
+    else:
+        raise WorkflowError(
+            "workflow has multiple entry prompts; select one with --command: "
+            + ", ".join(commands)
+        )
+
+    content = (path / ".opencode" / "commands" / f"{selected}.md").read_text(
+        encoding="utf-8"
     )
+    if content.startswith("---"):
+        parts = content.split("---", 2)
+        if len(parts) == 3:
+            content = parts[2]
+    prompt = content.replace("$ARGUMENTS", "").strip()
+    if not prompt:
+        raise WorkflowError(f"workflow command prompt is empty: {selected}")
+    return prompt
 
 
 def _free_local_port() -> int:
@@ -350,7 +363,7 @@ def build_parser() -> argparse.ArgumentParser:
     open_parser.add_argument(
         "--command",
         dest="entry_command",
-        help="Entry command to prefill (default: the workflow's only command).",
+        help="Saved command prompt to prefill (default: the workflow's only command).",
     )
     open_parser.add_argument(
         "--with-plugins",
@@ -368,7 +381,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.command == "new":
             path = create_workflow(root, args.name, args.template)
             print(f"Created {path}")
-            print(f"Edit {path / 'AGENTS.md'} and {path / 'opencode.jsonc'}")
+            print(
+                "Edit "
+                f"{path / '.opencode/commands/research.md'} for the saved question; "
+                f"use {path / 'AGENTS.md'} for reusable guidance and "
+                f"{path / 'opencode.jsonc'} for MCPs"
+            )
             print(f"Open with: opencode-workflow --root {root} open {args.name}")
         elif args.command == "list":
             for path in discover_workflows(root):

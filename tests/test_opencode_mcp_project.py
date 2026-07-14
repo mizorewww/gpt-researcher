@@ -9,9 +9,14 @@ OPEN_CODE_PROJECT = PROJECT_ROOT / "opencode" / "market-research-smoke"
 def test_opencode_project_is_native_and_has_only_tool_mcps():
     config = json.loads((OPEN_CODE_PROJECT / "opencode.jsonc").read_text())
 
-    assert set(config["mcp"]) == {"gpt-researcher-codex-long", "yfinance"}
+    assert set(config["mcp"]) == {
+        "time",
+        "gpt-researcher-codex-long",
+        "yfinance",
+    }
     assert config["model"] == "deepseek/deepseek-v4-pro"
-    assert config["permission"]["bash"] == "allow"
+    assert config["permission"]["time_*"] == "allow"
+    assert "bash" not in config["permission"]
     assert not (
         PROJECT_ROOT / "gpt_researcher" / "opencode_workflow" / "runner.py"
     ).exists()
@@ -19,37 +24,22 @@ def test_opencode_project_is_native_and_has_only_tool_mcps():
     assert not (PROJECT_ROOT / "research_workflows" / "workflow.schema.json").exists()
 
 
-def test_task_context_is_separate_from_generic_orchestration():
-    task_context = (OPEN_CODE_PROJECT / "AGENTS.md").read_text().lower()
-    coordinator = (
-        OPEN_CODE_PROJECT / ".opencode/agents/research-coordinator.md"
-    ).read_text().lower()
-    worker = (
-        OPEN_CODE_PROJECT / ".opencode/agents/research-worker.md"
-    ).read_text().lower()
-    skill = (
-        OPEN_CODE_PROJECT / ".opencode/skills/parallel-research/SKILL.md"
-    ).read_text().lower()
+def test_saved_question_is_separate_from_generic_research_instructions():
+    instructions = (OPEN_CODE_PROJECT / "AGENTS.md").read_text().lower()
+    saved_question = (
+        (OPEN_CODE_PROJECT / ".opencode/commands/research.md").read_text().lower()
+    )
 
-    assert "美国" in task_context
-    assert "大宗商品" in task_context
-    assert "不要要求用户补充日期或时区" in task_context
+    assert "美国" in saved_question
+    assert "大宗商品" in saved_question
+    assert "昨天" in saved_question
+    assert "三个" not in instructions
+    assert not list((OPEN_CODE_PROJECT / ".opencode/agents").glob("*.md"))
+    assert not list((OPEN_CODE_PROJECT / ".opencode/skills").glob("*/SKILL.md"))
     for required_tool_term in (
         "gpt-researcher-codex-long",
         "research_report",
         "yfinance",
-        "必须",
+        "time",
     ):
-        assert required_tool_term in task_context
-    generic_orchestration = "\n".join((coordinator, worker, skill))
-    for workflow_specific_term in (
-        "gpt-researcher-codex-long",
-        "research_report",
-        "yfinance",
-        "股票",
-        "市场日报",
-        "nasdaq",
-        "kospi",
-        "expensive high-level",
-    ):
-        assert workflow_specific_term not in generic_orchestration
+        assert required_tool_term in instructions

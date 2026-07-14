@@ -31,7 +31,8 @@ def test_new_workflow_copies_template_and_replaces_tokens(workflows: Path):
 
     assert created == workflows / "company-research"
     assert "Company Research" in (created / "AGENTS.md").read_text()
-    assert (created / ".opencode/agents/research-coordinator.md").is_file()
+    assert not list((created / ".opencode/agents").glob("*.md"))
+    assert not list((created / ".opencode/skills").glob("*/SKILL.md"))
     assert load_config(created / "opencode.jsonc")["mcp"] == {}
     assert discover_workflows(workflows) == [created]
 
@@ -79,8 +80,8 @@ def test_show_visualizes_prompt_mcps_and_optional_harness(workflows: Path):
 
     assert "Prompt: AGENTS.md" in summary
     assert "deep-research (enabled)" in summary
-    assert "research-coordinator" in summary
-    assert "parallel-research" in summary
+    assert "agents: none" in summary
+    assert "skills: none" in summary
 
 
 def test_cli_lists_and_open_starts_fresh_tui_with_prefilled_entry_command(
@@ -101,9 +102,10 @@ def test_cli_lists_and_open_starts_fresh_tui_with_prefilled_entry_command(
         assert main(["--root", str(workflows), "open", "policy-research"]) == 0
 
     chdir.assert_called_once_with(created)
+    saved_prompt = "在这里写打开工作流时需要自动填入输入框的完整调查问题。"
     thread.assert_called_once_with(
         target=_prefill_tui,
-        args=(4567, created, "/research "),
+        args=(4567, created, saved_prompt),
         daemon=True,
     )
     thread.return_value.start.assert_called_once_with()
@@ -123,13 +125,15 @@ def test_cli_lists_and_open_starts_fresh_tui_with_prefilled_entry_command(
 
 def test_workflow_entry_prompt_is_generic_and_requires_a_choice(workflows: Path):
     created = create_workflow(workflows, "policy-research", "_template")
-    assert workflow_entry_prompt(created) == "/research "
+    assert workflow_entry_prompt(created) == (
+        "在这里写打开工作流时需要自动填入输入框的完整调查问题。"
+    )
 
     commands = created / ".opencode/commands"
     (commands / "audit.md").write_text("Audit the request.", encoding="utf-8")
     with pytest.raises(WorkflowError, match="multiple entry prompts"):
         workflow_entry_prompt(created)
-    assert workflow_entry_prompt(created, "audit") == "/audit "
+    assert workflow_entry_prompt(created, "audit") == "Audit the request."
 
 
 def test_cli_rejects_path_traversal(workflows: Path):

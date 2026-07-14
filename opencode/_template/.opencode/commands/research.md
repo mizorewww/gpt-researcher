@@ -1,8 +1,5 @@
 ---
-description: Run the current project's research workflow.
-agent: research-coordinator
+description: Open the saved research question.
 ---
 
-Execute the request below using the task and tool contract in AGENTS.md.
-
-$ARGUMENTS
+在这里写打开工作流时需要自动填入输入框的完整调查问题。

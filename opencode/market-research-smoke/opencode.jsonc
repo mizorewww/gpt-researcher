@@ -1,16 +1,22 @@
 {
   "$schema": "https://opencode.ai/config.json",
   "model": "deepseek/deepseek-v4-pro",
-  "default_agent": "research-coordinator",
   "permission": {
     "*": "deny",
-    "bash": "allow",
-    "skill": "allow",
-    "task": "allow",
+    "time_*": "allow",
     "gpt-researcher-codex-long_*": "allow",
     "yfinance_*": "allow"
   },
   "mcp": {
+    "time": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "mcp-server-time"
+      ],
+      "timeout": 30000,
+      "enabled": true
+    },
     "gpt-researcher-codex-long": {
       "type": "local",
       "command": [

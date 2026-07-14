@@ -1,8 +1,7 @@
 ---
-description: Run the current project's research task.
-agent: research-coordinator
+description: Run the saved market investigation.
 ---
 
-Execute the investigation requested below using the task context in AGENTS.md and the parallel-research skill. If there are no arguments, run the default task in AGENTS.md; derive runtime values such as the local date and timezone yourself as instructed there.
+帮我调研昨天的股票市场，覆盖美国、日本、韩国和香港的市场大盘、市场对宏观经济的预期、大宗商品以及各种重要股票，并结合最近热点写一份详尽、严肃的中文日报。每只入选股票都需要调查透彻。
 
-$ARGUMENTS
+虽然报告主题是昨天，但需要调查最近一段时间的信息来解释市场行为。请多次调用调查工具，阅读每次结果后继续追问和补足证据，直到重要事实、数据、驱动因素、分歧和风险得到充分调查。

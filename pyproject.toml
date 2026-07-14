@@ -10,9 +10,7 @@ include = [
     { path = "opencode/_template", format = ["sdist", "wheel"] },
     { path = "opencode/market-research-smoke/AGENTS.md", format = ["sdist", "wheel"] },
     { path = "opencode/market-research-smoke/opencode.jsonc", format = ["sdist", "wheel"] },
-    { path = "opencode/market-research-smoke/.opencode/agents", format = ["sdist", "wheel"] },
     { path = "opencode/market-research-smoke/.opencode/commands", format = ["sdist", "wheel"] },
-    { path = "opencode/market-research-smoke/.opencode/skills", format = ["sdist", "wheel"] },
 ]
 
 [tool.poetry.dependencies]
