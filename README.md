@@ -241,7 +241,16 @@ opencode run --pure \
   '目标日期为 2026-07-10，时区 Asia/Singapore。生成完整市场日报。'
 ```
 
-To create a different investigation, copy that directory and replace `AGENTS.md`, including the new workflow's tool-call requirements; change `opencode.jsonc` only when the available MCP set changes. See the [OpenCode MCP guide](docs/OPENCODE_MCP_WORKFLOW.md).
+Create a different investigation from the generic template, inspect it, then open it directly in the OpenCode UI:
+
+```bash
+uv run opencode-workflow new company-research
+uv run opencode-workflow show company-research
+uv run opencode-workflow open company-research       # TUI
+uv run opencode-workflow open company-research --web # Web UI
+```
+
+Put the task and tool-call contract in `AGENTS.md`, available MCPs in `opencode.jsonc`, and optional custom orchestration in `.opencode/`. See the [OpenCode MCP guide](docs/OPENCODE_MCP_WORKFLOW.md).
 
 ### 🔧 MCP Client
 GPT Researcher supports MCP integration to connect with specialized data sources like GitHub repositories, databases, and custom APIs. This enables research from data sources alongside web search.

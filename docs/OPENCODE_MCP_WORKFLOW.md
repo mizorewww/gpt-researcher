@@ -69,18 +69,47 @@ opencode run --pure \
 
 ## 快速创建另一种调查任务
 
-复制这个原生 OpenCode 项目即可，不需要生成器或 Python harness：
+仓库提供一个只负责脚手架、查看和启动界面的轻量 CLI。它不执行工作流、不规定 MCP，也不验证业务结果。
+
+从空白通用模板创建：
 
 ```bash
-cp -R opencode/market-research-smoke opencode/company-research
+uv run opencode-workflow new company-research
 ```
 
-然后：
+生成的目录位于 `opencode/company-research`。接下来只需：
 
-1. 改 `AGENTS.md`，写新的任务背景、覆盖范围、证据要求、具体工具调用契约和完成标准。
-2. 如需不同数据源，只改 `opencode.jsonc` 中的 MCP 和 worker 的工具权限。
-3. 通常无需修改 coordinator、worker、command 或 `parallel-research` skill。
-4. 用 `opencode mcp list --pure` 检查工具，再用同一条 `opencode run` 命令执行。
+1. 在 `AGENTS.md` 写任务、工具调用契约和完成标准。
+2. 在 `opencode.jsonc` 添加可用 MCP，并允许相应工具名。
+3. 只有需要自定义编排时才修改 `.opencode/` 中的 agent、skill 或 command。
+
+也可以把现有工作流当模板复制：
+
+```bash
+uv run opencode-workflow new asia-market-copy \
+  --template market-research-smoke
+```
+
+列出和在终端可视化工作流：
+
+```bash
+uv run opencode-workflow list
+uv run opencode-workflow show company-research
+```
+
+直接打开该工作流的 OpenCode TUI：
+
+```bash
+uv run opencode-workflow open company-research
+```
+
+或者启动并打开 OpenCode Web UI：
+
+```bash
+uv run opencode-workflow open company-research --web
+```
+
+默认使用 OpenCode `--pure`，避免外部 plugin 改变行为；需要加载外部 plugin 时添加 `--with-plugins`。若工作流放在其他目录，可设置 `OPENCODE_WORKFLOWS_DIR`，或在任意命令前传入 `--root /path/to/workflows`。
 
 若任务不要求三路并发，可在新的 `AGENTS.md` 中指定需要的独立方向数量；通用 skill 会遵循任务要求。不同调查需要不同 MCP 或调用顺序时，也应写入各自的 `AGENTS.md`，不能移动到通用 agent、skill 或 Python harness。
 
