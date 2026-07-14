@@ -206,17 +206,11 @@ When `CODEX_SEARCH_SERVICE_TIER=fast`, the helper passes both `service_tier="fas
 
 The tested profile is `search + medium + fast`, with up to `12` source-addressable results retained from each Codex call. The MCP coordinator admits at most three isolated report workers and queues at most nine more jobs. Each report can make up to six Codex calls over its lifetime, but its per-report semaphore allows only three simultaneous Codex processes. The cross-process slot pool therefore enforces a machine-wide ceiling of nine simultaneous Codex processes across the three workers. A worker uses at most four ordinary retrievers and five scrapers. Every checkout shares `~/.gpt-researcher/slots` by default; set `GPT_RESEARCHER_GLOBAL_SLOT_ROOT` only when all coordinator processes use the same alternative writable directory.
 
-For clients that explicitly choose the direct GPT Researcher MCP API, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`. It starts this checkout with `uv run --directory ...` and exposes:
+For clients that explicitly choose the direct GPT Researcher MCP API, use the checked-in `.mcp.json` server `gpt-researcher-codex-long`. It starts this checkout with `uv run --directory ...` and exposes exactly one tool:
 
-- `profile_info`
-- `research_report` for compatibility and short requests
-- `research_report_start(query, ..., target_date, timezone)`
-- `research_report_status(job_id, wait_seconds=0)`
-- `research_reports_status(job_ids, wait_seconds=20)`
-- `research_report_result(job_id, include_report=false)`
-- `research_report_cancel(job_id)`
+- `research_report(query)`
 
-Within that direct API, long reports can be submitted with `research_report_start`, batch long-polled with `research_reports_status`, and fetched with `research_report_result`. These are backend API semantics, not instructions that an OpenCode workflow must place in `AGENTS.md` or follow as a fixed tool sequence. Relative dates are resolved and frozen at submission; pass `target_date` and `timezone` explicitly for repeatable reports.
+The call waits until the isolated worker reaches a terminal state and then returns the complete result directly. Queueing, status polling, result retrieval, cancellation cleanup, timeouts, and durable audit files remain private server implementation details. An MCP client can issue several independent `research_report` calls concurrently; the server admits up to three report workers and applies its existing global capacity limits without exposing a job protocol to the model.
 
 The MCP server is also packaged as a local console entry point. From this checkout, validate it with:
 

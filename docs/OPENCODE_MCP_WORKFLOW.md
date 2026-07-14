@@ -1,6 +1,6 @@
 # OpenCode 通用调查工作流
 
-OpenCode 负责理解保存的问题并调用工具；GPT Researcher、Yahoo Finance 和 time 都只是普通 MCP。项目没有额外的 workflow runner，也没有把业务规则写进 Python harness。
+OpenCode 负责理解保存的问题并调用工具；GPT Researcher、Yahoo Finance 和 time 都只是普通 MCP。项目没有额外的 workflow runner，也没有把业务规则写进 Python harness。GPT Researcher MCP 只暴露 `research_report(query)`：一次调用等待完整报告后直接返回；多份独立调查由 OpenCode 同时发出多个调用，服务端负责真正并发，不向模型暴露 job、轮询或结果获取协议。
 
 内置案例位于 [`opencode/market-research-smoke`](../opencode/market-research-smoke/)：
 

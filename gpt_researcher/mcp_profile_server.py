@@ -76,8 +76,9 @@ _HTTP_URL_PATTERN = r"https?://[^\s<>\[\]()|]+"
 mcp = FastMCP(
     "gpt-researcher-codex-long",
     instructions=(
-        "Run GPT Researcher using the active environment profile. "
-        "For this checkout the default is Tavily + Codex long search."
+        "Use research_report(query) for a complete investigation. The call waits "
+        "until the report is finished and returns it directly. Independent calls "
+        "may be issued concurrently."
     ),
 )
 
@@ -631,9 +632,8 @@ def _save_failure_audit(
     return task_id, path, payload
 
 
-@mcp.tool()
 def profile_info() -> dict[str, Any]:
-    """Return the active GPT Researcher search profile without running research."""
+    """Return the active search profile for internal diagnostics."""
     return {
         "workdir": str(WORKDIR),
         "RETRIEVER": os.getenv("RETRIEVER"),
@@ -1139,23 +1139,9 @@ async def _run_research_report(
 
 
 @mcp.tool()
-async def research_report(
-    query: str,
-    report_type: str = "research_report",
-    tone: str = "objective",
-    report_source: str = "web",
-    target_date: str | None = None,
-    timezone: str = DEFAULT_TIMEZONE,
-) -> dict[str, Any]:
-    """Run a short report through an isolated worker and wait for its result."""
-    started = await research_report_start(
-        query,
-        report_type,
-        tone,
-        report_source,
-        target_date,
-        timezone,
-    )
+async def research_report(query: str) -> dict[str, Any]:
+    """Investigate one complete question, wait until finished, and return the report."""
+    started = await _submit_research_report(query)
     job_id = str(started["job_id"])
     manager = _get_job_manager()
     try:
@@ -1188,8 +1174,7 @@ async def research_report(
     raise RuntimeError(json.dumps(failure, ensure_ascii=False))
 
 
-@mcp.tool()
-async def research_report_start(
+async def _submit_research_report(
     query: str,
     report_type: str = "research_report",
     tone: str = "objective",
@@ -1224,37 +1209,7 @@ async def research_report_start(
         "query": query,
         "target_date": resolved_target_date,
         "timezone": resolved_timezone,
-        "message": "Research job queued. Poll research_report_status with this job_id.",
     }
-
-
-@mcp.tool()
-async def research_report_status(
-    job_id: str, wait_seconds: float = 0
-) -> dict[str, Any]:
-    """Return compact durable status, optionally waiting for one state change."""
-    return await _get_job_manager().wait_status(job_id, wait_seconds)
-
-
-@mcp.tool()
-async def research_reports_status(
-    job_ids: list[str], wait_seconds: float = 20
-) -> dict[str, Any]:
-    """Long-poll compact status for multiple research jobs in one call."""
-    statuses = await _get_job_manager().wait_many(job_ids, wait_seconds)
-    return {"jobs": statuses}
-
-
-@mcp.tool()
-def research_report_result(job_id: str, include_report: bool = False) -> dict[str, Any]:
-    """Return a terminal result; omit the potentially large report by default."""
-    return _get_job_manager().result(job_id, include_report=include_report)
-
-
-@mcp.tool()
-async def research_report_cancel(job_id: str) -> dict[str, Any]:
-    """Cancel a queued job or terminate a running worker process group."""
-    return await _get_job_manager().cancel(job_id)
 
 
 def main() -> None:

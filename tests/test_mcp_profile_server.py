@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import tempfile
 import textwrap
@@ -36,6 +37,13 @@ class ErrorResearcher(FakeResearcher):
 
 
 class TestMcpProfileServer(unittest.TestCase):
+    def test_mcp_exposes_one_blocking_research_tool(self):
+        self.assertEqual(
+            set(mcp_profile_server.mcp._tool_manager._tools), {"research_report"}
+        )
+        signature = inspect.signature(mcp_profile_server.research_report)
+        self.assertEqual(list(signature.parameters), ["query"])
+
     def test_writer_catalog_is_domain_neutral_deduplicated_and_bounded(self):
         first = EvidenceItem(
             claim="Revenue increased",
@@ -224,7 +232,7 @@ class TestMcpProfileServer(unittest.TestCase):
             )
             self.assertTrue((output_dir / "broken query.failed.json").exists())
 
-    def test_research_report_start_status_result_use_isolated_worker(self):
+    def test_research_report_waits_for_isolated_worker_and_returns_full_result(self):
         with tempfile.TemporaryDirectory() as tmp_dir:
             root = Path(tmp_dir)
             worker = root / "fake_worker.py"
@@ -237,33 +245,55 @@ class TestMcpProfileServer(unittest.TestCase):
                     timeout_seconds=5,
                 )
                 with patch.object(mcp_profile_server, "_JOB_MANAGER", manager):
-                    started = await mcp_profile_server.research_report_start(
-                        "investigate a generic topic", timezone="Asia/Singapore"
-                    )
-                    self.assertEqual(started["status"], "queued")
-                    while True:
-                        status = await mcp_profile_server.research_report_status(
-                            started["job_id"], wait_seconds=1
-                        )
-                        if status["status"] == "completed":
-                            break
-                    result = mcp_profile_server.research_report_result(
-                        started["job_id"]
-                    )
-                    expanded = mcp_profile_server.research_report_result(
-                        started["job_id"], include_report=True
+                    result = await mcp_profile_server.research_report(
+                        "investigate a generic topic"
                     )
                 await manager.shutdown()
-                return started, status, result, expanded
+                return result
 
-            started, status, result, expanded = asyncio.run(run_job())
+            result = asyncio.run(run_job())
 
-            self.assertEqual(status["status"], "completed")
-            self.assertNotIn("result", status)
             self.assertEqual(result["http_sources_count"], 25)
-            self.assertNotIn("report", result["result"])
-            self.assertIn("report", expanded["result"])
-            self.assertEqual(started["timezone"], "Asia/Singapore")
+            self.assertEqual(result["report"], "report for investigate a generic topic")
+
+    def test_independent_research_report_calls_can_run_concurrently(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            root = Path(tmp_dir)
+            worker = root / "barrier_worker.py"
+            marker = '(args.job_dir / "started").write_text(str(os.getpid()))'
+            barrier = """
+deadline = time.time() + 2
+while len(list(args.job_dir.parent.glob("*/started"))) < 2:
+    if time.time() >= deadline:
+        raise SystemExit("second worker did not start concurrently")
+    time.sleep(0.01)
+"""
+            worker.write_text(
+                textwrap.dedent(FAKE_WORKER).replace(marker, marker + barrier),
+                encoding="utf-8",
+            )
+
+            async def run_reports():
+                manager = JobManager(
+                    root / "jobs",
+                    worker_command=(__import__("sys").executable, str(worker)),
+                    max_concurrent_jobs=2,
+                    timeout_seconds=5,
+                )
+                try:
+                    with patch.object(mcp_profile_server, "_JOB_MANAGER", manager):
+                        return await asyncio.gather(
+                            mcp_profile_server.research_report("first question"),
+                            mcp_profile_server.research_report("second question"),
+                        )
+                finally:
+                    await manager.shutdown()
+
+            results = asyncio.run(run_reports())
+            self.assertEqual(
+                [result["report"] for result in results],
+                ["report for first question", "report for second question"],
+            )
 
 
 if __name__ == "__main__":
