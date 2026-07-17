@@ -19,8 +19,13 @@ services:
     volumes:
       - gpt-researcher-source:/workspace/gpt-researcher
       - gpt-researcher-venv:/opt/venv
+      - gpt-researcher-uv-cache:/home/app/.cache/uv
+      - gpt-researcher-codex-home:/home/app/.codex
+      - ${CODEX_AUTH_FILE:-${HOME}/.codex/auth.json}:/run/codex-auth.json:ro
     restart: unless-stopped
 
 volumes:
   gpt-researcher-source:
   gpt-researcher-venv:
+  gpt-researcher-uv-cache:
+  gpt-researcher-codex-home:

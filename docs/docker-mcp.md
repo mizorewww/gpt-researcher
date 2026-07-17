@@ -4,6 +4,10 @@
 镜像不包含项目源码：每次容器启动时，入口脚本会在持久卷中首次 clone 上游，随后抓取指定 ref 的最新提交。
 
 1. 在 Compose 文件旁准备外置凭据文件：`cp .env.example .env`，再填写所需 API key。`.env` 不会被复制到镜像或 clone 的仓库中。
+   如果 `RETRIEVER` 包含 `codex`，Compose 默认从 `${HOME}/.codex/auth.json`
+   引导容器认证；也可设置 `CODEX_AUTH_FILE=/path/to/auth.json`。认证会复制到
+   独立的 `gpt-researcher-codex-home` 卷中，以便 Codex CLI 刷新令牌。uv
+   下载缓存和虚拟环境也分别保存在命名卷中，后续重建无需重新下载全部依赖。
 2. 启动：
 
    ```sh
