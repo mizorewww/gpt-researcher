@@ -73,6 +73,9 @@ DEFAULT_TIMEZONE = "Asia/Singapore"
 
 _HTTP_URL_PATTERN = r"https?://[^\s<>\[\]()|]+"
 
+MCP_HOST = os.getenv("MCP_HOST", "127.0.0.1")
+MCP_PORT = int(os.getenv("MCP_PORT", "8000"))
+
 mcp = FastMCP(
     "gpt-researcher-codex-long",
     instructions=(
@@ -80,6 +83,8 @@ mcp = FastMCP(
         "until the report is finished and returns it directly. Independent calls "
         "may be issued concurrently."
     ),
+    host=MCP_HOST,
+    port=MCP_PORT,
 )
 
 _JOB_MANAGER: JobManager | None = None
@@ -1213,12 +1218,17 @@ async def _submit_research_report(
 
 
 def main() -> None:
-    """Run the MCP server over stdio."""
+    """Run the MCP server using stdio or Streamable HTTP."""
     # Recover durable state and terminate any owned orphan worker before the
     # transport starts accepting calls. Queued jobs are scheduled lazily once
     # FastMCP's event loop handles the first job operation.
     _get_job_manager()
-    mcp.run(transport="stdio")
+    transport = os.getenv("MCP_TRANSPORT", "stdio")
+    if transport not in {"stdio", "sse", "streamable-http"}:
+        raise ValueError(
+            "MCP_TRANSPORT must be one of: stdio, sse, streamable-http"
+        )
+    mcp.run(transport=transport)
 
 
 if __name__ == "__main__":

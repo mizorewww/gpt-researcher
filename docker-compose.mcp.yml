@@ -1,0 +1,26 @@
+services:
+  gpt-researcher-mcp:
+    build:
+      context: .
+      dockerfile: docker/mcp/Dockerfile
+    image: gpt-researcher-mcp:local
+    env_file:
+      - ./.env
+    environment:
+      # Override either value in the host .env to use another upstream/ref.
+      GPT_RESEARCHER_REPOSITORY: ${GPT_RESEARCHER_REPOSITORY:-https://github.com/mizorewww/gpt-researcher.git}
+      GPT_RESEARCHER_REVISION: ${GPT_RESEARCHER_REVISION:-main}
+      GPT_RESEARCHER_PROFILE_DIR: /workspace/gpt-researcher
+      MCP_TRANSPORT: streamable-http
+      MCP_HOST: 0.0.0.0
+      MCP_PORT: "8811"
+    ports:
+      - "127.0.0.1:8811:8811"
+    volumes:
+      - gpt-researcher-source:/workspace/gpt-researcher
+      - gpt-researcher-venv:/opt/venv
+    restart: unless-stopped
+
+volumes:
+  gpt-researcher-source:
+  gpt-researcher-venv:
