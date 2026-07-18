@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
+from uuid import UUID
 
 from gpt_researcher import mcp_profile_server
 from gpt_researcher.evidence import EvidenceItem
@@ -196,8 +197,10 @@ class TestMcpProfileServer(unittest.TestCase):
                 [attempt["stage"] for attempt in payload["attempts"]],
                 ["retrieval"],
             )
-            self.assertTrue(
-                (output_dir / "investigate a generic topic.failed.json").exists()
+            UUID(payload["task_id"])
+            self.assertEqual(
+                [path.name for path in output_dir.glob("*.failed.json")],
+                [f"{payload['task_id']}.failed.json"],
             )
             self.assertEqual(list(output_dir.glob("*.md")), [])
 
@@ -230,7 +233,31 @@ class TestMcpProfileServer(unittest.TestCase):
             self.assertIn(
                 "ValueError: retriever exploded", payload["attempts"][0]["reason"]
             )
-            self.assertTrue((output_dir / "broken query.failed.json").exists())
+            UUID(payload["task_id"])
+            self.assertEqual(
+                [path.name for path in output_dir.glob("*.failed.json")],
+                [f"{payload['task_id']}.failed.json"],
+            )
+
+    def test_save_report_uses_uuid_filename_for_long_multibyte_query(self):
+        with tempfile.TemporaryDirectory() as tmp_dir:
+            output_dir = Path(tmp_dir)
+            query = "2026年美国股市收盘情况及主要驱动因素" * 20
+
+            with patch.object(mcp_profile_server, "OUTPUT_DIR", output_dir):
+                task_id, markdown, path = mcp_profile_server._save_report(
+                    query=query,
+                    report="# Report",
+                    report_type="research_report",
+                    report_source="web",
+                    tone="objective",
+                    researcher=FakeResearcher(),
+                )
+
+            UUID(task_id)
+            self.assertEqual(path.name, f"{task_id}.md")
+            self.assertEqual(path.read_text(encoding="utf-8"), markdown)
+            self.assertIn(f'query: "{query}"', markdown)
 
     def test_research_report_waits_for_isolated_worker_and_returns_full_result(self):
         with tempfile.TemporaryDirectory() as tmp_dir:

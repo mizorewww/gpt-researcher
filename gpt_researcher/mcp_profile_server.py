@@ -543,11 +543,7 @@ def _save_report(
     )
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = OUTPUT_DIR / f"{title}.md"
-    index = 2
-    while path.exists():
-        path = OUTPUT_DIR / f"{title}_{index}.md"
-        index += 1
+    path = OUTPUT_DIR / f"{task_id}.md"
     atomic_write_text(path, final_markdown)
     return task_id, final_markdown, path
 
@@ -628,11 +624,7 @@ def _save_failure_audit(
     }
 
     OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    path = OUTPUT_DIR / f"{title}.failed.json"
-    index = 2
-    while path.exists():
-        path = OUTPUT_DIR / f"{title}_{index}.failed.json"
-        index += 1
+    path = OUTPUT_DIR / f"{task_id}.failed.json"
     atomic_write_json(path, payload)
     return task_id, path, payload
 
