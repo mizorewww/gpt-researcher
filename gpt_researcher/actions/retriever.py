@@ -25,6 +25,7 @@ def get_retriever(retriever: str):
         - brave: Brave Search API
         - arxiv: arXiv academic search
         - tavily: Tavily search API
+        - tinyfish: Tinyfish Search API
         - exa: Exa search
         - crw: fastCRW search (Firecrawl-compatible web scraper)
         - semantic_scholar: Semantic Scholar academic search
@@ -80,6 +81,10 @@ def get_retriever(retriever: str):
             from gpt_researcher.retrievers import TavilySearch
 
             return TavilySearch
+        case "tinyfish":
+            from gpt_researcher.retrievers import TinyfishSearch
+
+            return TinyfishSearch
         case "groundroute":
             from gpt_researcher.retrievers import GroundRouteSearch
 
