@@ -1,2 +1,9 @@
 .git
+.env
+.env.*
+!.env.example
+.codex/
+secrets/
+__pycache__/
+*.py[cod]
 output/
