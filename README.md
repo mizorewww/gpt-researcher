@@ -312,6 +312,9 @@ GPT Researcher now includes Deep Research - an advanced recursive research workf
 
 ## Run with Docker
 
+For the standalone Streamable HTTP MCP deployment on Debian ARM64/AMD64, see
+[Docker MCP deployment](docs/docker-mcp.md).
+
 > **Step 1** - [Install Docker](https://docs.gptr.dev/docs/gpt-researcher/getting-started/getting-started-with-docker)
 
 > **Step 2** - Clone the '.env.example' file, add your API Keys to the cloned file and save the file as '.env'

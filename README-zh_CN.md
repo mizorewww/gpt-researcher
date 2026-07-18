@@ -131,6 +131,8 @@ $ uvicorn main:app --reload
 > **第 5 步** - 在任何浏览器上访问 http://localhost:8000，享受研究乐趣！
 
 要了解如何开始使用 Docker 或了解有关功能和服务的更多信息，请访问 [documentation](https://docs.gptr.dev) 页面。
+如需在 Debian ARM64/AMD64 上运行独立的 Streamable HTTP MCP 服务，请参阅
+[Docker MCP 部署指南](docs/docker-mcp.md)。
 
 ## 🔍 可观测性
 
